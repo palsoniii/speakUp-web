@@ -39,17 +39,17 @@ export default function ResetPassword({ onDone }) {
     <div className="auth-shell">
       <div className="auth-panel">
         <Logo />
-        <Title style={{ marginTop: 14 }}>Set a new password.</Title>
-        <Body className="dim" style={{ marginTop: 6 }}>
+        <Title style={{ marginTop: 20 }}>Set a new password.</Title>
+        <Body className="dim" style={{ marginTop: 8 }}>
           You'll be signed back in with it right away.
         </Body>
 
-        <Card large style={{ marginTop: 24 }}>
+        <Card large style={{ marginTop: 28 }}>
           <form onSubmit={submit}>
             <Label>New password</Label>
             <input
               className="field-input"
-              style={{ marginTop: 8 }}
+              style={{ marginTop: 10 }}
               type="password"
               placeholder="At least 6 characters"
               value={password}
@@ -59,10 +59,10 @@ export default function ResetPassword({ onDone }) {
               autoFocus
             />
 
-            <Label style={{ marginTop: 14 }}>Confirm password</Label>
+            <Label style={{ marginTop: 20 }}>Confirm password</Label>
             <input
               className="field-input"
-              style={{ marginTop: 8 }}
+              style={{ marginTop: 10 }}
               type="password"
               placeholder="Type it again"
               value={confirm}
@@ -71,13 +71,13 @@ export default function ResetPassword({ onDone }) {
               minLength={6}
             />
             {mismatch ? (
-              <Body className="faint" style={{ marginTop: 6, fontSize: 12 }}>
+              <Body className="faint" style={{ marginTop: 8, fontSize: 12 }}>
                 Passwords don't match yet.
               </Body>
             ) : null}
 
             {error ? (
-              <Body className="ai-feedback-error" style={{ marginTop: 12 }}>
+              <Body className="ai-feedback-error" style={{ marginTop: 14 }}>
                 {error}
               </Body>
             ) : null}
@@ -86,7 +86,7 @@ export default function ResetPassword({ onDone }) {
               title={submitting ? "Please wait…" : "Set new password"}
               icon={KeyRound}
               disabled={submitting || password.length < 6 || confirm.length < 6 || mismatch}
-              style={{ marginTop: 18 }}
+              style={{ marginTop: 24 }}
             />
           </form>
         </Card>

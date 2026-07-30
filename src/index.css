@@ -275,6 +275,11 @@ a {
 
 .card-lg {
   border-radius: 30px;
+  /* .card's 18px reads fine for small stat tiles, but the three places
+     this "large" variant is used (Login/ResetPassword's auth forms,
+     Landing's demo card) are the visual centerpiece of their screen and
+     were feeling cramped at the same padding as a stat tile. */
+  padding: clamp(22px, 4vw, 30px);
   box-shadow: var(--shadow-card-lg);
 }
 
@@ -2672,9 +2677,9 @@ textarea.note-input::placeholder {
      text, is enough to read as "centered" without that side effect. */
   text-align: center;
   width: 100%;
-  max-width: 440px;
+  max-width: 460px;
   margin: 0 auto;
-  padding: clamp(24px, 5vw, 64px);
+  padding: clamp(28px, 6vw, 64px);
   position: relative;
   z-index: 1;
 }

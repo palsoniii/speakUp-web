@@ -84,8 +84,8 @@ export default function Login({ initialMode = "signin", onBack }) {
 
         {signupDone ? (
           <>
-            <Title style={{ marginTop: 14 }}>Check your email</Title>
-            <Body className="dim" style={{ marginTop: 10 }}>
+            <Title style={{ marginTop: 20 }}>Check your email</Title>
+            <Body className="dim" style={{ marginTop: 12 }}>
               We sent a confirmation link to <strong>{email}</strong>. Click it, then come back and
               sign in below.
             </Body>
@@ -96,13 +96,13 @@ export default function Login({ initialMode = "signin", onBack }) {
                 setSignupDone(false);
                 goToMode("signin");
               }}
-              style={{ marginTop: 20 }}
+              style={{ marginTop: 24 }}
             />
           </>
         ) : resetSent ? (
           <>
-            <Title style={{ marginTop: 14 }}>Check your email</Title>
-            <Body className="dim" style={{ marginTop: 10 }}>
+            <Title style={{ marginTop: 20 }}>Check your email</Title>
+            <Body className="dim" style={{ marginTop: 12 }}>
               If there's an account for <strong>{email}</strong>, we've sent a link to reset its
               password. Click it, then come back and sign in with your new password.
             </Body>
@@ -113,28 +113,28 @@ export default function Login({ initialMode = "signin", onBack }) {
                 setResetSent(false);
                 goToMode("signin");
               }}
-              style={{ marginTop: 20 }}
+              style={{ marginTop: 24 }}
             />
           </>
         ) : (
           <>
-            <Title style={{ marginTop: 14 }}>
+            <Title style={{ marginTop: 20 }}>
               {mode === "forgot" ? "Reset your password." : mode === "signin" ? "Welcome back." : "Two minutes a day starts here."}
             </Title>
-            <Body className="dim" style={{ marginTop: 6 }}>
+            <Body className="dim" style={{ marginTop: 8 }}>
               {mode === "forgot"
                 ? "Enter the email on your account and we'll send you a link to set a new password."
                 : "Your sessions, streak and badges follow the account — not the browser you happened to use."}
             </Body>
 
-            <Card large style={{ marginTop: 24 }}>
+            <Card large style={{ marginTop: 28 }}>
               <form onSubmit={submit}>
                 {mode === "signup" ? (
                   <>
                     <Label>Name</Label>
                     <input
                       className="field-input"
-                      style={{ marginTop: 8 }}
+                      style={{ marginTop: 10 }}
                       type="text"
                       placeholder="Your name"
                       value={name}
@@ -145,10 +145,10 @@ export default function Login({ initialMode = "signin", onBack }) {
                   </>
                 ) : null}
 
-                <Label style={{ marginTop: mode === "signup" ? 14 : 0 }}>Email</Label>
+                <Label style={{ marginTop: mode === "signup" ? 20 : 0 }}>Email</Label>
                 <input
                   className="field-input"
-                  style={{ marginTop: 8 }}
+                  style={{ marginTop: 10 }}
                   type="email"
                   placeholder="you@example.com"
                   value={email}
@@ -159,7 +159,7 @@ export default function Login({ initialMode = "signin", onBack }) {
 
                 {mode !== "forgot" ? (
                   <>
-                    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 14 }}>
+                    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 20 }}>
                       <Label>Password</Label>
                       {mode === "signin" ? (
                         <button
@@ -174,7 +174,7 @@ export default function Login({ initialMode = "signin", onBack }) {
                     </div>
                     <input
                       className="field-input"
-                      style={{ marginTop: 8 }}
+                      style={{ marginTop: 10 }}
                       type="password"
                       placeholder={mode === "signup" ? "At least 6 characters" : "••••••••"}
                       value={password}
@@ -186,27 +186,27 @@ export default function Login({ initialMode = "signin", onBack }) {
                 ) : null}
 
                 {error ? (
-                  <Body className="ai-feedback-error" style={{ marginTop: 12 }}>
+                  <Body className="ai-feedback-error" style={{ marginTop: 14 }}>
                     {error}
                   </Body>
                 ) : null}
 
-                <Button title={submitLabel} icon={submitIcon} disabled={submitDisabled} style={{ marginTop: 18 }} />
+                <Button title={submitLabel} icon={submitIcon} disabled={submitDisabled} style={{ marginTop: 24 }} />
               </form>
             </Card>
 
             {mode === "forgot" ? (
-              <Button title="Back to sign in" variant="ghost" onClick={() => goToMode("signin")} style={{ marginTop: 14 }} />
+              <Button title="Back to sign in" variant="ghost" onClick={() => goToMode("signin")} style={{ marginTop: 18 }} />
             ) : (
               <Button
                 title={mode === "signin" ? "New here? Create an account" : "Already have an account? Sign in"}
                 variant="ghost"
                 onClick={() => goToMode(mode === "signin" ? "signup" : "signin")}
-                style={{ marginTop: 14 }}
+                style={{ marginTop: 18 }}
               />
             )}
 
-            <Body className="faint" style={{ marginTop: 20, fontSize: 12 }}>
+            <Body className="faint" style={{ marginTop: 24, fontSize: 12 }}>
               Microphone access is asked for once, on your first session.
             </Body>
           </>
