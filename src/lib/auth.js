@@ -14,6 +14,21 @@ export async function signUp({ email, password, name }) {
   const options = name ? { data: { name } } : undefined;
   const { data, error } = await supabase.auth.signUp({ email, password, options });
   if (error) throw error;
+
+  // Supabase's signUp() does NOT throw for an email that's already
+  // registered when "Confirm email" is on (see Authentication -> Providers
+  // -> Email in the dashboard) — it returns a 200 with a *fake* user object
+  // instead, deliberately, so a stranger probing random addresses can't use
+  // the error/no-error split to learn which emails have accounts here. The
+  // one reliable tell is `identities` coming back empty (a genuinely new
+  // signup always has exactly one identity). Login.jsx was treating this
+  // response as a real signup and showing "check your email" for an email
+  // that already had an account — no new account was created and nothing
+  // was actually sent, so surface the truth here instead of pretending it
+  // worked, which is what the person reported hitting.
+  if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+    throw new Error("An account already exists for this email — try signing in instead.");
+  }
   return data;
 }
 

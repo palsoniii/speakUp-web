@@ -3,8 +3,6 @@ import { LogIn, UserPlus } from "lucide-react";
 import { Body, Button, Card, Label, Logo, Title } from "../components/UI";
 import { signIn, signUp } from "../lib/auth";
 
-const CATEGORY_COLORS = ["#6C8CFF", "#4CD9B0", "#F2B84B", "#F26C6C", "#B98CFF"];
-
 // Real account auth via Supabase. Reached from Landing's "Sign in" / "Start
 // free" buttons — initialMode seeds which tab is active, onBack returns to
 // the marketing page.
@@ -43,7 +41,7 @@ export default function Login({ initialMode = "signin", onBack }) {
 
   return (
     <div className="auth-shell">
-      <div className="auth-left">
+      <div className="auth-panel">
         {onBack ? (
           <button
             onClick={onBack}
@@ -154,22 +152,6 @@ export default function Login({ initialMode = "signin", onBack }) {
             </Body>
           </>
         )}
-      </div>
-
-      <div className="auth-right">
-        <div style={{ maxWidth: 420 }}>
-          <p className="auth-right-quote">
-            "The scary part was never the content. It was the four seconds before I started talking."
-          </p>
-          <Body style={{ marginTop: 18, fontSize: 13, fontWeight: 700 }} className="dim">
-            Every person who ever prepped for an interview
-          </Body>
-          <div className="auth-bars">
-            {CATEGORY_COLORS.map((c) => (
-              <span key={c} style={{ background: c }} />
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );

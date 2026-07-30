@@ -21,6 +21,12 @@ const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
 // app is specifically trying to measure survive the transcript.
 const MODEL = "whisper-large-v3-turbo";
 
+// A real ~2 minute practice recording (webm/opus) is a few MB at most —
+// this exists to cap the blast radius of a bug or a signed-in user
+// deliberately uploading oversized files, since every request here draws
+// against one shared Groq free-tier quota.
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024; // 20MB
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -44,6 +50,12 @@ Deno.serve(async (req: Request) => {
     if (!audio || !(audio instanceof File)) {
       return new Response(JSON.stringify({ error: "Missing 'audio' file in form data." }), {
         status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (audio.size > MAX_AUDIO_BYTES) {
+      return new Response(JSON.stringify({ error: `Audio file too large (max ${MAX_AUDIO_BYTES / (1024 * 1024)}MB).` }), {
+        status: 413,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

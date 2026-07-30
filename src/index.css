@@ -2424,6 +2424,11 @@ textarea.note-input::placeholder {
   display: flex;
   gap: 22px;
   width: max-content;
+  /* Vertical breathing room for sp-bob below (translates each circle up to
+     -13px) plus the hover lift (-8px) and box-shadow bleed — without this,
+     .category-marquee's overflow:hidden (needed for the horizontal mask)
+     clips the tops of the circles as they bob upward. */
+  padding: 28px 0;
   animation: sp-marquee 46s linear infinite;
 }
 
@@ -2647,68 +2652,38 @@ textarea.note-input::placeholder {
 /* Login / auth                                                        */
 /* ------------------------------------------------------------------ */
 
+/* Single centered column — no marketing/quote side panel, just the form
+   itself in the middle of the screen both horizontally and vertically. */
 .auth-shell {
   min-height: 100%;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.auth-left {
+.auth-panel {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  /* Cap the column's own width (not each child individually, and not
-     centered) so content stays left-anchored like a normal auth page
-     instead of floating dead-centre in a wide half-screen panel. */
+  /* Deliberately NOT align-items: center — .card/.button are block
+     elements designed to fill this column's width (see .field-input's own
+     width: 100%, nested one level deeper); centering the flex items
+     directly would let them shrink to their content width instead and
+     throw off the input sizing. Centering the column as a whole, and its
+     text, is enough to read as "centered" without that side effect. */
+  text-align: center;
   width: 100%;
-  max-width: 480px;
+  max-width: 440px;
   margin: 0 auto;
   padding: clamp(24px, 5vw, 64px);
   position: relative;
   z-index: 1;
 }
 
-.auth-right {
-  display: none;
-  position: relative;
-  background:
-    radial-gradient(600px 400px at 60% 20%, rgba(110, 94, 242, 0.22), transparent 62%),
-    radial-gradient(500px 400px at 20% 90%, rgba(47, 174, 131, 0.18), transparent 60%);
-  padding: clamp(24px, 5vw, 64px);
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.auth-right-quote {
-  font-family: "Instrument Serif", Georgia, serif;
-  font-style: italic;
-  font-size: clamp(26px, 3.2vw, 36px);
-  line-height: 1.24;
-  letter-spacing: -0.01em;
-  position: relative;
-  z-index: 1;
-}
-
-.auth-bars {
-  display: flex;
-  gap: 6px;
-  margin-top: 28px;
-  position: relative;
-  z-index: 1;
-}
-
-.auth-bars span {
-  width: 34px;
-  height: 6px;
-  border-radius: 3px;
-}
-
-@media (min-width: 760px) {
-  .auth-right {
-    display: flex;
-  }
+/* The form's labels/inputs read better left-aligned than centered like the
+   headline copy above the card — the one part of the panel that opts back
+   out of .auth-panel's text-align: center. */
+.auth-panel form {
+  text-align: left;
 }
 
 /* ------------------------------------------------------------------ */

@@ -20,6 +20,14 @@ const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
 // from the 8B model this app used to run locally via Ollama.
 const DEFAULT_MODEL = "llama-3.3-70b-versatile";
 
+// Every real prompt aiCoach.js builds (a ~2 minute transcript plus fixed
+// instructions) comes in well under this — it exists to cap the blast
+// radius of a bug or a signed-in user deliberately hammering the endpoint
+// with oversized input, since the whole point of proxying through here is
+// that everyone's requests draw against one shared Groq free-tier quota.
+const MAX_PROMPT_CHARS = 12000;
+const MAX_TOKENS_CEILING = 1000;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -45,12 +53,20 @@ Deno.serve(async (req: Request) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    if (prompt.length > MAX_PROMPT_CHARS) {
+      return new Response(JSON.stringify({ error: `Prompt too long (max ${MAX_PROMPT_CHARS} characters).` }), {
+        status: 413,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const body: Record<string, unknown> = {
       model: model || DEFAULT_MODEL,
       messages: [{ role: "user", content: prompt }],
       temperature: temperature ?? 0.5,
-      max_tokens: maxTokens ?? 500,
+      // Client-requested value is a ceiling, not a blank check — clamped so
+      // a tampered request can't ask Groq for an unbounded completion.
+      max_tokens: Math.min(Number(maxTokens) || 500, MAX_TOKENS_CEILING),
     };
     // Groq's OpenAI-compatible JSON mode — same idea as Ollama's `format:
     // "json"` this replaces, still requires the prompt itself to ask for JSON
