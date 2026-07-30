@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SpeakUp</title>
+    <script>
+      // Sets data-theme on <html> synchronously, before React (or even the
+      // stylesheet, in dev mode) loads — mirrors the exact same resolution
+      // order as resolveInitialTheme() in src/lib/theme.js. Without this,
+      // the app always painted with the default light `:root` variables
+      // first and only flipped to the saved dark theme once React mounted
+      // and its useEffect ran, which is what looked like "the previous UI"
+      // flashing on every refresh for anyone using dark mode. This has to
+      // stay a plain inline script (not a module, not moved into React) —
+      // the whole point is that it runs before anything else does.
+      (function () {
+        try {
+          var stored = localStorage.getItem("speakup:theme");
+          var theme =
+            stored === "light" || stored === "dark"
+              ? stored
+              : window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {
+          // localStorage can throw in some locked-down/private-mode
+          // contexts — falling through just means this one load defaults
+          // to light, same as before this fix existed.
+        }
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

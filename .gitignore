@@ -1,0 +1,31 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Supabase keys — VITE_SUPABASE_ANON_KEY is safe to expose client-side by
+# design (protected by Row Level Security, see supabase/schema.sql), but
+# .env itself still shouldn't be committed since people copy real project
+# URLs/keys into it locally and it's easy to forget which is which.
+.env
+.env.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
