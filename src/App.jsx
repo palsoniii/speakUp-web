@@ -5,6 +5,7 @@ import Progress from "./screens/Progress";
 import Badges from "./screens/Badges";
 import Settings from "./screens/Settings";
 import Login from "./screens/Login";
+import ResetPassword from "./screens/ResetPassword";
 import Landing from "./screens/Landing";
 import Pick from "./screens/Pick";
 import Prep from "./screens/Prep";
@@ -34,6 +35,14 @@ export default function App() {
   const [session, setSession] = useState(undefined);
   const [authView, setAuthView] = useState("landing"); // 'landing' | 'auth' — only used while signed out
   const [authMode, setAuthMode] = useState("signin"); // seeds Login's initial tab
+  // True the moment Supabase reports a PASSWORD_RECOVERY event — i.e. this
+  // load is someone landing back here via a "forgot password" email link.
+  // Supabase gives that link a real (if single-purpose) session so
+  // ResetPassword's updatePassword() call can succeed, but showing the
+  // normal signed-in app on that session would skip right past the actual
+  // point of the link — so this takes priority over the session check
+  // below until the new password is set.
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   const [tab, setTab] = useState("home");
   // null | 'pick' | 'spin' | 'prep' | 'record' | 'reflect' | 'celebrate'
@@ -47,7 +56,10 @@ export default function App() {
   useEffect(() => {
     if (!supabaseConfigured) return;
     getSession().then(setSession);
-    return onAuthStateChange((nextSession) => setSession(nextSession));
+    return onAuthStateChange((event, nextSession) => {
+      if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
+      setSession(nextSession);
+    });
   }, []);
 
   // Launched either with a category already picked (a card on Home) or with
@@ -111,6 +123,23 @@ export default function App() {
   if (session === undefined) {
     // Still resolving the initial session.
     return <div className="app-shell" />;
+  }
+
+  if (passwordRecovery) {
+    return (
+      <div className="app-shell">
+        <ResetPassword
+          onDone={() => {
+            // The reset link's #access_token=...&type=recovery hash has
+            // done its job (Supabase's client already read it); clearing it
+            // from the address bar means a page refresh here re-enters the
+            // app normally instead of re-triggering PASSWORD_RECOVERY.
+            window.history.replaceState(null, "", window.location.pathname);
+            setPasswordRecovery(false);
+          }}
+        />
+      </div>
+    );
   }
 
   if (!session) {

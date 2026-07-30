@@ -11,6 +11,8 @@ Real accounts now (Supabase Auth) — sessions, streak, badges, and settings liv
 3. In **Project Settings → API**, copy your Project URL and `anon` `public` key.
 4. In this repo, copy `.env.example` to `.env` and fill those two values in.
 5. By default, new accounts need to click a confirmation link sent to their email before they can sign in. For quick local testing you can turn that off in **Authentication → Providers → Email → Confirm email**, but leave it on for a real deployment.
+6. "Forgot password" emails link back to this app's own URL — add every URL you run this from (`http://localhost:5173` for local dev, plus your real deployed domain once you have one) to **Authentication → URL Configuration → Redirect URLs**, or those emails will bounce visitors to the wrong place.
+7. Recommended, free: **Authentication → Policies → Password → enable "Leaked password protection"** — rejects passwords that show up in known breach databases, checked via HaveIBeenPwned.
 
 ## Set up hosted AI (one-time)
 
@@ -67,11 +69,11 @@ Recording requires `MediaRecorder` + microphone permission, supported in current
 ```
 src/
   App.jsx                  auth-gated routing (Supabase session state, plain React state otherwise — no router lib)
-  screens/                 Home, History, Settings, Login, Roulette, Prep, Record, Reflect
+  screens/                 Home, History, Settings, Login, ResetPassword, Roulette, Prep, Record, Reflect
   components/UI.jsx        shared Card/Button/Pill/Switch/Text components
   lib/content.js           exercise types + prompt/topic/vocab banks + daily assignment
   lib/supabaseClient.js    Supabase client + "is it configured" check
-  lib/auth.js              sign up / sign in / sign out / session helpers
+  lib/auth.js              sign up / sign in / sign out / password reset / session helpers
   lib/storage.js           Supabase-backed sessions/settings/recordings + streak/stat calculations
   lib/badges.js            badge definitions + which ones are earned
   lib/analysis.js          rule-based speaking feedback (pace, fillers, power/weak words, articulation score)

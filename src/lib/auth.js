@@ -43,6 +43,33 @@ export async function signOut() {
   if (error) throw error;
 }
 
+// Sends a password-reset email containing a link back to this same app
+// (redirectTo: the current origin). Supabase's client picks the recovery
+// token up from the URL automatically on load and fires a
+// PASSWORD_RECOVERY event via onAuthStateChange below — App.jsx listens for
+// that to show the "set a new password" screen rather than dropping the
+// visitor straight into the signed-in app on a temporary recovery session.
+//
+// Deliberately does NOT throw (or distinguish) for an email with no
+// account — same "don't let the response shape reveal who has an account
+// here" reasoning as the identities check in signUp above. Supabase itself
+// already behaves this way (success either way), so this is just naming
+// that on purpose rather than it being an accident.
+export async function sendPasswordReset(email) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin,
+  });
+  if (error) throw error;
+}
+
+// Called from the "set a new password" screen once someone has landed back
+// here via the reset-link's recovery session. Supabase requires an active
+// session to call this — the recovery link itself is what provides one.
+export async function updatePassword(password) {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw error;
+}
+
 export async function getSession() {
   const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
@@ -52,9 +79,13 @@ export async function getSession() {
 // App.jsx subscribes once at the top level so every screen can trust
 // "logged in or not" without each one polling Supabase itself. Returns the
 // unsubscribe function directly (matches the shape useEffect cleanup wants).
+// Passes the event name through (not just the session) so App.jsx can tell
+// a PASSWORD_RECOVERY session — created automatically when someone lands
+// back here via a reset-password email link — apart from a normal sign-in,
+// and show the "set a new password" screen instead of the signed-in app.
 export function onAuthStateChange(callback) {
   const {
     data: { subscription },
-  } = supabase.auth.onAuthStateChange((_event, session) => callback(session));
+  } = supabase.auth.onAuthStateChange((event, session) => callback(event, session));
   return () => subscription.unsubscribe();
 }
