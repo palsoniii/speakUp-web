@@ -2,11 +2,13 @@
 
 **Daily spoken-fluency practice in the browser.** Get a prompt, talk for 60–120 seconds, and see exactly how you sounded — pace, filler words, and pauses counted directly from your own transcript, plus a qualitative AI read on structure, delivery, and word choice.
 
-[Live demo →](#) &nbsp;·&nbsp; Built solo, end to end: product, frontend, database design, auth, AI integration, and infra.
+[Live demo →](https://speakup-daily.vercel.app) &nbsp;·&nbsp; Built solo, end to end: product, frontend, database design, auth, AI integration, and infra.
 
-<!-- Swap the live-demo link once deployed, and drop a screenshot or short
-     screen recording (GIF) of the practice flow right here — Home →
-     Roulette → Record → Reflect is the strongest 20 seconds to show. -->
+![SpeakUp home screen — a day's exercise, weekly activity strip, and the five practice categories](docs/screenshot-home.png)
+
+<!-- A screenshot or short screen recording (GIF) of the practice flow itself
+     — Home → Roulette → Record → Reflect — would be an even stronger addition
+     here; the one above only shows the home screen. -->
 
 ---
 
