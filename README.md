@@ -215,8 +215,8 @@ public/
 
 ## License
 
-No license file yet — this is currently a personal/portfolio project, not published for reuse. [MIT](https://choosealicense.com/licenses/mit/) is the likely choice if that changes.
+[MIT](./LICENSE) — see the `LICENSE` file.
 
 ---
 
-Built by [your name] as a solo project — architecture, frontend, database design, auth, AI integration, and deployment all one person's work end to end.
+Built by Pal Soni as a solo project — architecture, frontend, database design, auth, AI integration, and deployment all one person's work end to end.
