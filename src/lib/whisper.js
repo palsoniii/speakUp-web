@@ -61,6 +61,23 @@ async function transcribeLocal(blob, context, timeoutMs) {
   }
 }
 
+// supabase-js leaves `data` empty on a non-2xx response, so the Edge
+// Function's real error text (including the per-user daily-limit message
+// from check_rate_limit() — see supabase/functions/transcribe/index.ts)
+// has to be read off `error.context` (the raw Response) instead. Same
+// pattern as aiCoach.js's readFunctionErrorBody, kept local here rather
+// than shared since it's a few lines and the two files' error shapes could
+// legitimately drift.
+async function readFunctionErrorBody(error) {
+  try {
+    const ctx = error?.context;
+    if (ctx && typeof ctx.json === "function") return await ctx.json();
+  } catch {
+    // ignore — caller falls back to a generic message
+  }
+  return null;
+}
+
 async function transcribeHosted(blob, context, timeoutMs) {
   const form = new FormData();
   form.append("audio", blob, "recording.webm");
@@ -73,7 +90,24 @@ async function transcribeHosted(blob, context, timeoutMs) {
       body: form,
       signal: controller.signal,
     });
-    if (error) throw new Error(data?.error || error.message || "Hosted transcription failed.");
+    if (error) {
+      const body = await readFunctionErrorBody(error);
+      const err = new Error(body?.error || data?.error || error.message || "Hosted transcription failed.");
+      // Lets callers (Record.jsx) tell "you hit your own daily transcription
+      // cap" apart from every other failure (network hiccup, Groq down,
+      // local server unreachable) — see check_rate_limit() in
+      // supabase/schema.sql and the matching block in
+      // supabase/functions/transcribe/index.ts for where these come from.
+      // Everything else stays a silent fallback to the browser's live
+      // captions (if any); this one specific case is worth telling the
+      // person about since it explains a real gap in their feedback, not
+      // just a transient blip.
+      if (body?.code === "rate_limited") {
+        err.code = body.code;
+        err.scope = body.scope;
+      }
+      throw err;
+    }
     return { transcript: data?.transcript || "", segments: data?.segments || [], source: "whisper_hosted" };
   } finally {
     clearTimeout(timer);

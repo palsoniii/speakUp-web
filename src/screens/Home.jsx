@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Body, Button, Card, Logo, StatTile, TextButton, ThemeToggle, Title } from "../components/UI";
+import { Body, Button, Card, LoadErrorNote, Logo, StatTile, TextButton, ThemeToggle, Title } from "../components/UI";
 import { EXERCISE_TYPES, getDailyExercise } from "../lib/content";
 import { computeStats, didCompleteToday, getSessions, getSettings } from "../lib/storage";
+import { reportError } from "../lib/errorMonitoring";
 
 const WEEK_ORDER = ["S", "M", "T", "W", "T", "F", "S"]; // Sunday -> Saturday, matches storage.js's last7
 
@@ -15,6 +16,12 @@ const WEEK_ORDER = ["S", "M", "T", "W", "T", "F", "S"]; // Sunday -> Saturday, m
 // silently replaced once the fresh fetch resolves — same trade already made
 // for isNew above, just extended to survive a full reload, not just a tab
 // switch.
+//
+// Also holds displayName (fetched from a separate getSettings() call, not
+// getSessions()) for the exact same reason — without it, the greeting
+// flashed from the email-prefix fallback ("Ready when you are,
+// palsonirocks.") to the real name ("...Pal Soni.") on every refresh, same
+// class of bug as the numbers this cache was originally built for.
 function homeCacheKey(userId) {
   return `speakup:homeCache:${userId}`;
 }
@@ -32,10 +39,15 @@ function loadCachedHome(userId) {
   }
 }
 
-function saveCachedHome(userId, data) {
+// Merges into whatever's already cached rather than overwriting wholesale —
+// the sessions fetch and the settings fetch resolve independently (separate
+// promises, no shared ordering), so each needs to be able to save its own
+// slice without clobbering whatever the other one already wrote.
+function saveCachedHome(userId, partial) {
   if (!userId) return;
   try {
-    window.localStorage.setItem(homeCacheKey(userId), JSON.stringify(data));
+    const existing = loadCachedHome(userId) || {};
+    window.localStorage.setItem(homeCacheKey(userId), JSON.stringify({ ...existing, ...partial }));
   } catch {
     // Storage can be full or disabled (private browsing) — worst case we
     // just fall back to the zeroed-flash behavior for this one user, so
@@ -64,30 +76,60 @@ export default function Home({ onStartExercise, refreshKey, user, theme, onToggl
   // already completed.
   const [statsLoaded, setStatsLoaded] = useState(Boolean(cached));
   const [completedToday, setCompletedToday] = useState(cached?.completedToday || false);
-  const [displayName, setDisplayName] = useState("");
+  const [displayName, setDisplayName] = useState(cached?.displayName || "");
   const [exploredCount, setExploredCount] = useState(cached?.exploredCount || 0);
   const [today] = useState(() => getDailyExercise());
+  // Set only if the background fetch below actually fails — previously
+  // neither getSessions() nor getSettings() here had a .catch at all, so a
+  // failure was an unhandled promise rejection: the screen just sat on
+  // whatever the cache (or the zeroed defaults, on a first-ever visit) had,
+  // with nothing telling the person their streak/stats might be stale or
+  // wrong. `retryTick` gives the Retry button a way to re-run the effect
+  // without duplicating its body.
+  const [loadError, setLoadError] = useState(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    getSessions().then((sessions) => {
-      if (cancelled) return;
-      const nextStats = computeStats(sessions);
-      const nextCompletedToday = didCompleteToday(sessions);
-      const nextExploredCount = new Set(sessions.map((s) => s.typeId)).size;
-      setStats(nextStats);
-      setCompletedToday(nextCompletedToday);
-      setExploredCount(nextExploredCount);
-      setStatsLoaded(true);
-      saveCachedHome(user?.id, { stats: nextStats, completedToday: nextCompletedToday, exploredCount: nextExploredCount });
-    });
-    getSettings().then((s) => {
-      if (!cancelled) setDisplayName(s.displayName || "");
-    });
+    getSessions()
+      .then((sessions) => {
+        if (cancelled) return;
+        const nextStats = computeStats(sessions);
+        const nextCompletedToday = didCompleteToday(sessions);
+        const nextExploredCount = new Set(sessions.map((s) => s.typeId)).size;
+        setStats(nextStats);
+        setCompletedToday(nextCompletedToday);
+        setExploredCount(nextExploredCount);
+        setStatsLoaded(true);
+        setLoadError(null);
+        saveCachedHome(user?.id, { stats: nextStats, completedToday: nextCompletedToday, exploredCount: nextExploredCount });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        reportError(err, "Home.getSessions");
+        setStatsLoaded(true);
+        setLoadError(err?.message || "Couldn't load your stats — check your connection and try again.");
+      });
+    getSettings()
+      .then((s) => {
+        if (cancelled) return;
+        const nextDisplayName = s.displayName || "";
+        setDisplayName(nextDisplayName);
+        saveCachedHome(user?.id, { displayName: nextDisplayName });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        reportError(err, "Home.getSettings");
+        // Doesn't overwrite a getSessions() failure above if both happen to
+        // fail — either message is a real, actionable "something's wrong",
+        // and showing whichever fired first/last is fine for a screen that
+        // only shows one error line.
+        setLoadError((prev) => prev || err?.message || "Couldn't load your profile settings.");
+      });
     return () => {
       cancelled = true;
     };
-  }, [refreshKey, user?.id]);
+  }, [refreshKey, user?.id, retryTick]);
 
   // Gated on statsLoaded, not just `stats.totalSessions === 0` — that
   // condition is also true for a split second on every single refresh,
@@ -125,6 +167,8 @@ export default function Home({ onStartExercise, refreshKey, user, theme, onToggl
           {onToggleTheme ? <ThemeToggle theme={theme} onToggle={onToggleTheme} /> : null}
         </div>
       </div>
+
+      <LoadErrorNote message={loadError} onRetry={() => setRetryTick((t) => t + 1)} style={{ marginTop: 14 }} />
 
       <div style={{ marginTop: 22 }}>
         <span className="demo-card-eyebrow">{isNew ? "Day one" : `${weekday} · day ${stats.streak}`}</span>

@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Vite writes one of these temp files every time it has to transform an ESM
+# vite.config.js on the fly (e.g. during `vite dev`/`vite build` in some
+# environments) — harmless, but they accumulate fast and have no reason to
+# ever be committed.
+vite.config.js.timestamp-*.mjs
+
 # Supabase keys — VITE_SUPABASE_ANON_KEY is safe to expose client-side by
 # design (protected by Row Level Security, see supabase/schema.sql), but
 # .env itself still shouldn't be committed since people copy real project

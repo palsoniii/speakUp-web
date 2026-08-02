@@ -1,0 +1,20 @@
+# Netlify build config — see vercel.json for the equivalent if you deploy
+# there instead, and README.md's "Deploying" section for how rollback works
+# on each host. Not used unless you actually connect this repo to Netlify.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Baseline security headers — cheap, standard hardening for a static site
+# with no server-rendered content to protect. Not a Content-Security-Policy:
+# this app loads Google Fonts client-side and talks to Supabase directly
+# from the browser, so a real CSP needs to be scoped to those origins
+# deliberately rather than pasted in generically; add one later if you want
+# it, but don't want a wrong one silently breaking fonts or auth.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"

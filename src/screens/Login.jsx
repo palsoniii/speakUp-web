@@ -206,9 +206,23 @@ export default function Login({ initialMode = "signin", onBack }) {
               />
             )}
 
-            <Body className="faint" style={{ marginTop: 24, fontSize: 12 }}>
-              Microphone access is asked for once, on your first session.
-            </Body>
+            {mode === "signup" ? (
+              <Body className="faint" style={{ marginTop: 24, fontSize: 12 }}>
+                By creating an account, you agree to SpeakUp's{" "}
+                <a href="/terms.html" target="_blank" rel="noreferrer">
+                  Terms
+                </a>{" "}
+                and{" "}
+                <a href="/privacy.html" target="_blank" rel="noreferrer">
+                  Privacy Policy
+                </a>{" "}
+                — including that your recordings and transcripts are sent to our AI provider (Groq) to generate feedback.
+              </Body>
+            ) : (
+              <Body className="faint" style={{ marginTop: 24, fontSize: 12 }}>
+                Microphone access is asked for once, on your first session.
+              </Body>
+            )}
           </>
         )}
       </div>

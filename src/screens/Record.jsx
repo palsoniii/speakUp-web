@@ -6,12 +6,24 @@ import { useRecorder } from "../lib/recorder";
 import { useSpeechTranscript } from "../lib/speech";
 import { getSettings } from "../lib/storage";
 import { transcribeWithWhisper } from "../lib/whisper";
+import { reportError } from "../lib/errorMonitoring";
+
+// Below this, we treat the recording as "nothing was actually said" rather
+// than trust whatever transcript came back — Whisper (and occasionally the
+// browser's own live transcription) can hallucinate plausible-looking text
+// on near-silent audio, especially primed with the exercise prompt as
+// context, which otherwise shows up as a real (if meaningless) Delivery
+// score for a session with no real speech in it. Deliberately low (well
+// under a second of actual voiced audio) so a quiet-but-real answer never
+// trips it — this is only meant to catch true silence.
+const MIN_VOICED_MS = 800;
 
 export default function Record({ exercise, onDone, onCancel }) {
   const color = exercise.color;
   const speakSeconds = exercise.speakSeconds;
   const [secondsLeft, setSecondsLeft] = useState(speakSeconds);
   const [finishing, setFinishing] = useState(false);
+  const [noVoice, setNoVoice] = useState(false);
   const { state, error, start, stop, cancel } = useRecorder();
   const speech = useSpeechTranscript();
   // getSettings() is now a Supabase network call (async), so this can't be
@@ -83,6 +95,16 @@ export default function Record({ exercise, onDone, onCancel }) {
     ]);
     const duration = elapsedRef.current || speakSeconds;
 
+    // Measured mic amplitude, not transcription, decides this — see
+    // MIN_VOICED_MS above. Only acts on it when the monitor actually ran
+    // (recResult.monitorActive), so a browser without Web Audio support
+    // just skips this check entirely instead of flagging every recording.
+    if (recResult?.monitorActive && (recResult.voicedMs || 0) < MIN_VOICED_MS) {
+      finishedRef.current = false;
+      setNoVoice(true);
+      return;
+    }
+
     // The browser's live SpeechRecognition transcript (if any) is the
     // fallback; a Whisper transcription — which preserves filler words the
     // cloud dictation service strips out — is preferred whenever it's
@@ -93,6 +115,18 @@ export default function Record({ exercise, onDone, onCancel }) {
     let transcript = speechResult?.transcript || "";
     let segments = speechResult?.segments || [];
     let transcriptSource = transcript ? "browser" : "none";
+    // Every transcribeWithWhisper failure now surfaces something on
+    // Reflect.jsx instead of vanishing into a silent catch — a session
+    // still saves fine either way (the recording + self-rating aren't
+    // affected), but "why didn't I get pace/filler feedback" or "why does
+    // this look less accurate than usual" are real questions worth a real,
+    // specific answer instead of a quietly thinner transcript with no
+    // explanation. Rate-limit hits get their own specific wording (see
+    // check_rate_limit() in supabase/schema.sql); everything else (network
+    // hiccup, Groq briefly down, local whisper-server not running) still
+    // gets a message built from the actual error, so a genuinely new
+    // failure mode shows up as real, reportable text instead of nothing.
+    let transcriptionIssueNote = null;
     if (recResult?.blob) {
       setFinishing(true);
       try {
@@ -112,8 +146,25 @@ export default function Record({ exercise, onDone, onCancel }) {
           // Progress.jsx/Reflect.jsx for how each is labeled.
           transcriptSource = whisperResult.source || "whisper_hosted";
         }
-      } catch {
-        // Neither local nor hosted transcription available — keep whatever the browser captured, if anything.
+      } catch (e) {
+        // Reported regardless of which branch below fires — including rate
+        // limit hits, since knowing how often those actually trigger in
+        // practice is exactly the signal needed to tell whether the caps in
+        // supabase/schema.sql are sized right.
+        reportError(e, "Record.transcribeWithWhisper");
+        const usedFallback = Boolean(transcript); // browser live captions, already assigned above
+        if (e?.code === "rate_limited" && e.scope === "day") {
+          transcriptionIssueNote =
+            "You've reached today's transcription limit for your account — it resets at midnight UTC, so come back tomorrow for full feedback. This recording and your self-rating are still saved.";
+        } else if (e?.code === "rate_limited" && e.scope === "minute") {
+          transcriptionIssueNote =
+            "Transcription hit a brief per-account limit — this recording and your self-rating are still saved, just without Whisper's transcript.";
+        } else {
+          const reason = e?.message || "unknown error";
+          transcriptionIssueNote = usedFallback
+            ? `Whisper transcription wasn't available for this session (${reason}), so this uses your browser's live captions instead — usually less accurate, especially for filler words. Your recording and self-rating are still saved.`
+            : `No transcript could be captured for this session (${reason}). Your recording and self-rating are still saved.`;
+        }
       }
     }
 
@@ -127,6 +178,7 @@ export default function Record({ exercise, onDone, onCancel }) {
       transcript,
       transcriptSource,
       segments,
+      transcriptionIssueNote,
       audioPauses: recResult?.pauses || [],
     });
   };
@@ -136,6 +188,23 @@ export default function Record({ exercise, onDone, onCancel }) {
     cancel();
     if (speechEnabledRef.current) speech.stop();
     onCancel();
+  };
+
+  // Re-arms the same screen for another attempt rather than bouncing back
+  // out to Pick/Roulette — the prompt and prep are already done, all that
+  // failed was the recording itself.
+  const retryRecording = async () => {
+    setNoVoice(false);
+    elapsedRef.current = 0;
+    setSecondsLeft(speakSeconds);
+    // clearInterval stops the timer but leaves intervalRef.current holding
+    // the now-dead interval id — the countdown effect only arms a new one
+    // when this ref is falsy, so without resetting it here the clock would
+    // redraw at the full time but never actually tick down again.
+    clearInterval(intervalRef.current);
+    intervalRef.current = null;
+    const ok = await start();
+    if (ok && speechEnabledRef.current) speech.start();
   };
 
   const progress = 1 - secondsLeft / speakSeconds;
@@ -151,6 +220,25 @@ export default function Record({ exercise, onDone, onCancel }) {
           </div>
         </div>
         <Button title="Back" variant="ghost" onClick={onCancel} />
+      </div>
+    );
+  }
+
+  if (noVoice) {
+    return (
+      <div className="center-screen">
+        <div>
+          <Label>No speech detected</Label>
+          <div className="mic-error" style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            <MicOff size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              We didn't pick up any speech in that recording — check your microphone isn't muted
+              and try again.
+            </span>
+          </div>
+        </div>
+        <Button title="Try again" onClick={retryRecording} style={{ background: color }} />
+        <Button title="Back" variant="ghost" onClick={onCancel} style={{ marginTop: 10 }} />
       </div>
     );
   }

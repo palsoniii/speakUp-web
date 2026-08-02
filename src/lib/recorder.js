@@ -27,6 +27,19 @@ export function useRecorder() {
   const sampleBufferRef = useRef(null);
   const pausesRef = useRef([]);
   const silenceStartMsRef = useRef(null);
+  // Total time spent above SILENCE_RMS_THRESHOLD — a direct, measured "did
+  // any real sound happen" signal, independent of transcription. Exists so
+  // callers can tell a genuinely silent recording apart from one Whisper
+  // just failed to transcribe: Whisper (and, less often, the browser's own
+  // SpeechRecognition) can hallucinate plausible-looking text on near-silent
+  // audio, especially when primed with a prompt as context, which otherwise
+  // shows up as a real (if meaningless) score for a session with no actual
+  // speech in it.
+  const voicedMsRef = useRef(0);
+  // Only true once startSilenceMonitor's Web Audio setup actually succeeds —
+  // guards the no-voice check below from false-positiving on every single
+  // recording in a browser where AudioContext isn't available/allowed.
+  const monitorActiveRef = useRef(false);
 
   const elapsedMs = () => {
     const ctx = audioContextRef.current;
@@ -49,6 +62,8 @@ export function useRecorder() {
       sampleBufferRef.current = new Float32Array(analyser.fftSize);
       pausesRef.current = [];
       silenceStartMsRef.current = null;
+      voicedMsRef.current = 0;
+      monitorActiveRef.current = true;
 
       monitorIntervalRef.current = setInterval(() => {
         const buf = sampleBufferRef.current;
@@ -60,16 +75,23 @@ export function useRecorder() {
 
         if (rms < SILENCE_RMS_THRESHOLD) {
           if (silenceStartMsRef.current === null) silenceStartMsRef.current = now;
-        } else if (silenceStartMsRef.current !== null) {
-          const durationMs = now - silenceStartMsRef.current;
-          if (durationMs >= MIN_PAUSE_MS) {
-            pausesRef.current.push({ atMs: Math.round(silenceStartMsRef.current), durationMs: Math.round(durationMs) });
+        } else {
+          voicedMsRef.current += SAMPLE_INTERVAL_MS;
+          if (silenceStartMsRef.current !== null) {
+            const durationMs = now - silenceStartMsRef.current;
+            if (durationMs >= MIN_PAUSE_MS) {
+              pausesRef.current.push({ atMs: Math.round(silenceStartMsRef.current), durationMs: Math.round(durationMs) });
+            }
+            silenceStartMsRef.current = null;
           }
-          silenceStartMsRef.current = null;
         }
       }, SAMPLE_INTERVAL_MS);
-    } catch {
-      // Web Audio setup failing shouldn't block recording — just no pause data this session.
+    } catch (e) {
+      // Web Audio setup failing shouldn't block recording — just no pause
+      // data this session (the recording itself, via MediaRecorder, is a
+      // separate API and unaffected). Logged rather than fully silent so
+      // "why don't I ever see pause chips" is traceable in the console.
+      console.warn("Silence/pause monitor unavailable this session:", e);
     }
   };
 
@@ -88,10 +110,13 @@ export function useRecorder() {
       silenceStartMsRef.current = null;
     }
     const pauses = pausesRef.current;
+    const voicedMs = voicedMsRef.current;
+    const monitorActive = monitorActiveRef.current;
+    monitorActiveRef.current = false;
     audioContextRef.current?.close().catch(() => {});
     audioContextRef.current = null;
     analyserRef.current = null;
-    return pauses;
+    return { pauses, voicedMs, monitorActive };
   };
 
   const start = useCallback(async () => {
@@ -145,15 +170,19 @@ export function useRecorder() {
     }
   }, []);
 
-  // Resolves { dataUrl, pauses } — pauses is [{ atMs, durationMs }], real
-  // silences detected from the mic audio, always available regardless of
-  // whether speech-to-text transcription is on.
+  // Resolves { dataUrl, pauses, voicedMs, monitorActive } — pauses is
+  // [{ atMs, durationMs }], real silences detected from the mic audio,
+  // always available regardless of whether speech-to-text transcription is
+  // on. voicedMs is total measured time above the silence threshold (see
+  // startSilenceMonitor); monitorActive tells callers whether that
+  // measurement actually ran at all, so a browser without Web Audio support
+  // doesn't get misread as "recorded total silence."
   const stop = useCallback(() => {
     return new Promise((resolve) => {
       const recorder = mediaRecorderRef.current;
-      const pauses = stopSilenceMonitor();
+      const { pauses, voicedMs, monitorActive } = stopSilenceMonitor();
       if (!recorder || recorder.state === "inactive") {
-        resolve({ dataUrl: null, blob: null, pauses });
+        resolve({ dataUrl: null, blob: null, pauses, voicedMs, monitorActive });
         return;
       }
       setState("stopping");
@@ -162,7 +191,7 @@ export function useRecorder() {
         streamRef.current?.getTracks().forEach((t) => t.stop());
         setState("idle");
         const dataUrl = await blobToDataUrl(blob);
-        resolve({ dataUrl, blob, pauses });
+        resolve({ dataUrl, blob, pauses, voicedMs, monitorActive });
       };
       recorder.stop();
     });

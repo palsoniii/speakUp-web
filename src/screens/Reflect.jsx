@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronUp, Loader2, Pause, Play, Sparkles } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Loader2, Pause, Play, Sparkles, Trash2 } from "lucide-react";
 import { Body, Button, Card, FeelingMarks, Label, Tabs, Title } from "../components/UI";
 import FlowHeader from "../components/FlowHeader";
 import { analyzeTranscript, tokenizeFillers } from "../lib/analysis";
@@ -33,7 +33,7 @@ const FEELINGS = [
   { value: 4, label: "Great" },
 ];
 
-export default function Reflect({ exercise, recording, onSaved }) {
+export default function Reflect({ exercise, recording, onSaved, onDiscard }) {
   const color = exercise.color;
   const [fbTab, setFbTab] = useState("delivery");
   const [feeling, setFeeling] = useState(null);
@@ -82,9 +82,20 @@ export default function Reflect({ exercise, recording, onSaved }) {
   // runs once in an effect rather than inline in a useMemo.
   useEffect(() => {
     let cancelled = false;
-    getSessions().then((sessions) => {
-      if (!cancelled) setTrend(computeFeedbackTrend(sessions, feedback));
-    });
+    getSessions()
+      .then((sessions) => {
+        if (!cancelled) setTrend(computeFeedbackTrend(sessions, feedback));
+      })
+      .catch((err) => {
+        // trend is a "compared to your recent average" supplement, not core
+        // feedback — the session's own numbers above are unaffected either
+        // way, and this screen already has enough going on (delivery/words/
+        // structure/assignment panels, save/discard) without a banner for a
+        // background comparison quietly not showing up. Logged (not
+        // silent-silent) so a "why don't I ever see a trend" complaint is
+        // traceable in the console instead of unexplainable.
+        if (!cancelled) console.warn("Couldn't load trend comparison:", err);
+      });
     return () => {
       cancelled = true;
     };
@@ -219,8 +230,15 @@ export default function Reflect({ exercise, recording, onSaved }) {
                 exerciseFit: exerciseFit
                   ? {
                       label: exerciseFit.label,
+                      // score/breakdown only exist for word_of_day/word_ladder
+                      // now (a literal target-word check, not the list-gated
+                      // composite grade the other three exercises used to
+                      // have) — undefined for the rest, which is correct: the
+                      // model's `ai` judgment below is the real grade there.
                       score: exerciseFit.score,
                       breakdown: exerciseFit.breakdown,
+                      goodChips: exerciseFit.goodChips,
+                      badChips: exerciseFit.badChips,
                       ai: aiFitState === "done" ? aiFitFeedback : null,
                     }
                   : null,
@@ -248,12 +266,27 @@ export default function Reflect({ exercise, recording, onSaved }) {
     }
   };
 
+  // Nothing's been written anywhere yet at this point — the recording only
+  // gets uploaded to Storage and the session row only gets inserted inside
+  // save() above. So "delete" here just means walking away: discard the
+  // local recording/feedback state and drop back to Home, no actual
+  // storage/DB cleanup required.
+  const discard = () => {
+    if (saving) return;
+    if (window.confirm("Discard this session? Your recording and feedback won't be saved.")) {
+      onDiscard?.();
+    }
+  };
+
   const minutes = Math.floor((recording.durationSeconds || 0) / 60);
   const seconds = (recording.durationSeconds || 0) % 60;
   const aiPending = feedback.hasTranscript && (aiState === "idle" || aiState === "loading");
   const aiFitPending =
     feedback.hasTranscript && Boolean(exerciseFitLabel) && (aiFitState === "idle" || aiFitState === "loading");
 
+  // Generic fallback shown on every "no transcript" tab below, when there's
+  // no more specific reason to give (see recording.transcriptionIssueNote
+  // just below for when there is one).
   const noTranscriptNote =
     "No transcript captured for this session — either speech feedback is off in Settings, your browser doesn't support live transcription, or nothing was picked up. Your recording and self-rating are unaffected.";
 
@@ -266,13 +299,6 @@ export default function Reflect({ exercise, recording, onSaved }) {
         <Body className="dim" style={{ marginTop: 4 }}>
           {exercise.title} · spoke for {minutes}:{seconds.toString().padStart(2, "0")} · saved with
           your recording
-          {recording.transcriptSource === "whisper_local"
-            ? " · local Whisper"
-            : recording.transcriptSource === "whisper_hosted"
-            ? " · hosted Whisper"
-            : recording.transcriptSource === "browser"
-            ? " · browser transcript"
-            : ""}
         </Body>
 
         <button className="play-button" style={{ width: "auto" }} onClick={togglePlay}>
@@ -293,6 +319,23 @@ export default function Reflect({ exercise, recording, onSaved }) {
           </span>
           <span>{isPlaying ? "Playing…" : "Listen to your recording"}</span>
         </button>
+
+        {/* Set by Record.jsx (see its transcribeWithWhisper catch block) any
+            time Whisper transcription failed for this session, for any
+            reason — a hit daily/per-minute cap, the local server being
+            down, a Groq hiccup, anything. Shown once here, above the tabs,
+            so it's visible regardless of which tab is open — it applies
+            whether the session ended up with no transcript at all or with
+            the browser's (usually less accurate) live-caption fallback
+            instead, and those two cases render completely different tab
+            content below, so a single per-tab note can't cover both. */}
+        {recording.transcriptionIssueNote ? (
+          <Card style={{ marginTop: 14 }}>
+            <Body className="ai-feedback-error" style={{ fontSize: 12.5, margin: 0 }}>
+              {recording.transcriptionIssueNote}
+            </Body>
+          </Card>
+        ) : null}
 
         <div className="reflect-tabs">
           <Tabs tabs={tabs} value={fbTab} onChange={setFbTab} block />
@@ -330,6 +373,35 @@ export default function Reflect({ exercise, recording, onSaved }) {
                   <Body className="dim" style={{ marginTop: 12, fontSize: 13 }}>
                     {feedback.paceLabel}
                   </Body>
+
+                  {/* The model's own holistic delivery judgment (pacing
+                      control, energy, confidence — the things a listener
+                      would actually notice) is the headline here now, not a
+                      fixed rubric. The wpm/filler/pause numbers above are
+                      still the objective, always-available floor: real
+                      whether or not this call succeeds. */}
+                  {aiState === "done" && aiFeedback?.deliveryScore != null ? (
+                    <div style={{ marginTop: 16 }}>
+                      <AiScoreCallout score={aiFeedback.deliveryScore} heading="AI delivery read" color={color} />
+                    </div>
+                  ) : null}
+                  {aiState === "loading" ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+                      <Loader2 size={14} className="icon-spin" style={{ color }} />
+                      <Body className="dim" style={{ fontSize: 12.5 }}>
+                        Reading your delivery…
+                      </Body>
+                    </div>
+                  ) : null}
+                  {aiState === "done" && aiFeedback?.deliveryNote ? (
+                    <Body className="ai-feedback-text" style={{ marginTop: 12, fontSize: 13 }}>
+                      {aiFeedback.deliveryNote}
+                    </Body>
+                  ) : aiState === "error" ? (
+                    <Body className="dim" style={{ marginTop: 12, fontSize: 12.5 }}>
+                      AI delivery read unavailable right now — the counts above are still real and unaffected.
+                    </Body>
+                  ) : null}
 
                   {trend?.ready ? (
                     <div className="trend-row">
@@ -422,12 +494,64 @@ export default function Reflect({ exercise, recording, onSaved }) {
           {fbTab === "words" ? (
             feedback.hasTranscript ? (
               <Card>
+                {/* The model's own read of the actual vocabulary — vivid vs.
+                    vague, precise vs. repetitive — is the headline judgment
+                    now, not a fixed power/weak-word list. It can score a
+                    strong word choice that isn't on any list, and it won't
+                    give free credit to a listed "power word" used
+                    awkwardly. The list-scan chips below still render either
+                    way, as evidence — and become the ONLY content here,
+                    promoted back to primary, if this call fails. */}
+                {aiState === "done" && aiFeedback?.wordChoiceScore != null ? (
+                  <div style={{ marginBottom: 14 }}>
+                    <AiScoreCallout score={aiFeedback.wordChoiceScore} heading="AI word-choice read" color={color} />
+                  </div>
+                ) : null}
+                {aiState === "loading" ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                    <Loader2 size={14} className="icon-spin" style={{ color }} />
+                    <Body className="dim" style={{ fontSize: 12.5 }}>
+                      Reading your word choice…
+                    </Body>
+                  </div>
+                ) : null}
+                {aiState === "done" && aiFeedback?.wordChoiceNote ? (
+                  <Body className="ai-feedback-text" style={{ fontSize: 13, marginBottom: 16 }}>
+                    {aiFeedback.wordChoiceNote}
+                  </Body>
+                ) : aiState === "error" ? (
+                  <Body className="dim" style={{ fontSize: 12.5, marginBottom: 16 }}>
+                    AI word-choice score unavailable right now — the quick scan below still stands.
+                  </Body>
+                ) : null}
+
+                {aiState === "done" && (aiFeedback?.strongPhrases?.length || aiFeedback?.weakPhrases?.length) ? (
+                  <div className="line-callouts" style={{ marginBottom: 16 }}>
+                    {(aiFeedback.strongPhrases || []).map((q, i) => (
+                      <div className="line-callout line-callout-strong" key={`strong-${i}`}>
+                        <span className="line-callout-label">Strong word choice</span>
+                        <span className="line-callout-text">"{q}"</span>
+                      </div>
+                    ))}
+                    {(aiFeedback.weakPhrases || []).map((q, i) => (
+                      <div className="line-callout line-callout-tighten" key={`weak-${i}`}>
+                        <span className="line-callout-label">Could be more precise</span>
+                        <span className="line-callout-text">"{q}"</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
                 {/* Power/weak words always render, even with zero hits — a
                     silent gap here used to be indistinguishable from "not
                     implemented"; an explicit empty state makes it clear the
-                    detector ran and just didn't find that category this time. */}
+                    detector ran and just didn't find that category this time.
+                    Framed as a quick keyword scan, not a grade — see the
+                    file comment in analysis.js. It's supporting evidence
+                    alongside the AI read above, and becomes the primary
+                    content on this tab if that call is unavailable. */}
                 <div className="feedback-metric-label" style={{ fontSize: 11 }}>
-                  WHAT STRENGTHENED IT
+                  QUICK SCAN: WHAT STRENGTHENED IT
                 </div>
                 {feedback.powerWords.length > 0 ? (
                   <div className="filler-chips">
@@ -444,7 +568,7 @@ export default function Reflect({ exercise, recording, onSaved }) {
                 )}
 
                 <div className="feedback-metric-label" style={{ fontSize: 11, marginTop: 14 }}>
-                  WHAT SOFTENED IT
+                  QUICK SCAN: WHAT SOFTENED IT
                 </div>
                 {feedback.weakWords.length > 0 || feedback.fillerCounts.length > 0 ? (
                   <div className="filler-chips">
@@ -599,11 +723,6 @@ export default function Reflect({ exercise, recording, onSaved }) {
                         ) : null}
                       </div>
                     ) : null}
-
-                    <Body className="faint" style={{ marginTop: 16, fontSize: 11.5 }}>
-                      Structure and the two line calls are a model reading your transcript.
-                      Everything on the other tabs is counted, not judged.
-                    </Body>
                   </>
                 ) : (
                   <>
@@ -670,13 +789,50 @@ export default function Reflect({ exercise, recording, onSaved }) {
         </Body>
       ) : null}
 
-      <Button
-        title={saving ? "Saving…" : aiPending || aiFitPending ? "Waiting on AI coaching…" : "Save & finish"}
-        icon={Check}
-        onClick={save}
-        disabled={saving || aiPending || aiFitPending}
-        style={{ background: color, marginTop: saveError ? 10 : 20 }}
-      />
+      <div style={{ display: "flex", gap: 10, marginTop: saveError ? 10 : 20 }}>
+        <Button
+          title="Delete"
+          icon={Trash2}
+          variant="ghost"
+          onClick={discard}
+          disabled={saving}
+          style={{ flex: "0 0 auto", width: "auto", color: "var(--bad)", borderColor: "color-mix(in srgb, var(--bad) 40%, var(--line))" }}
+        />
+        <Button
+          title={saving ? "Saving…" : aiPending || aiFitPending ? "Waiting on AI coaching…" : "Save & finish"}
+          icon={Check}
+          onClick={save}
+          disabled={saving || aiPending || aiFitPending}
+          style={{ background: color, flex: 1 }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Compact score + bar for a model-judged (not counted) number — same visual
+// language as ArticulationScore's headline row, smaller, and explicitly
+// labeled "AI [x] read" so it's never confused with the objective counts
+// sitting right next to it on the same tab. Used on the Delivery and Words
+// tabs for deliveryScore/wordChoiceScore now that those are the primary
+// qualitative judgment rather than a note bolted next to a fixed-list score.
+function AiScoreCallout({ score, heading, color }) {
+  return (
+    <div>
+      <div className="articulation-score-row">
+        <div className="articulation-score-value" style={{ color, fontSize: 22 }}>
+          {score}
+        </div>
+        <div className="articulation-score-label">
+          <div>{heading}</div>
+          <div className="dim" style={{ fontSize: 11 }}>
+            out of 100
+          </div>
+        </div>
+      </div>
+      <div className="articulation-bar-track">
+        <div className="articulation-bar-fill" style={{ width: `${score}%`, background: color }} />
+      </div>
     </div>
   );
 }
@@ -745,11 +901,7 @@ function ArticulationScore({ articulation, color }) {
 function ExerciseFitPanel({ fit, aiState, aiFeedback, aiError, onRetryAi, color }) {
   return (
     <div>
-      <Body className="dim" style={{ fontSize: 12.5 }}>
-        {fit.intro}
-      </Body>
-
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 4 }}>
         {aiState === "idle" || aiState === "loading" ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Loader2 size={16} className="icon-spin" style={{ color }} />
@@ -768,7 +920,7 @@ function ExerciseFitPanel({ fit, aiState, aiFeedback, aiError, onRetryAi, color 
                   <div className="articulation-score-label">
                     <div>{aiFeedback.verdict || fit.heading}</div>
                     <div className="dim" style={{ fontSize: 11 }}>
-                      AI judgment · out of 100
+                      out of 100
                     </div>
                   </div>
                 </div>
@@ -782,12 +934,14 @@ function ExerciseFitPanel({ fit, aiState, aiFeedback, aiError, onRetryAi, color 
               {aiFeedback.summary}
             </Body>
 
-            {aiFeedback.evidenceQuote ? (
+            {aiFeedback.evidenceQuotes?.length ? (
               <div className="line-callouts">
-                <div className="line-callout line-callout-strong">
-                  <span className="line-callout-label">From your transcript</span>
-                  <span className="line-callout-text">"{aiFeedback.evidenceQuote}"</span>
-                </div>
+                {aiFeedback.evidenceQuotes.map((q, i) => (
+                  <div className="line-callout line-callout-strong" key={i}>
+                    <span className="line-callout-label">From your transcript</span>
+                    <span className="line-callout-text">"{q}"</span>
+                  </div>
+                ))}
               </div>
             ) : null}
           </>
@@ -800,12 +954,8 @@ function ExerciseFitPanel({ fit, aiState, aiFeedback, aiError, onRetryAi, color 
       </div>
 
       <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
-        <div className="feedback-metric-label" style={{ fontSize: 11 }}>
-          ALSO COUNTED AUTOMATICALLY
-        </div>
-
         {fit.metrics?.length ? (
-          <div className="feedback-metrics" style={{ marginTop: 10 }}>
+          <div className="feedback-metrics" style={{ marginTop: 0 }}>
             {fit.metrics.map((m) => (
               <div className="feedback-metric" key={m.label}>
                 <div className="feedback-metric-value">{m.value}</div>
@@ -906,11 +1056,35 @@ function smoothPath(points) {
 // with the rest of this app's zero-extra-deps approach. viewBox-scaled so
 // it stretches to the card width via CSS without any JS measuring.
 function WpmChart({ data, color }) {
-  const width = 300;
-  const height = 92;
-  const topPad = 14;
-  const bottomPad = 16;
-  const sidePad = 6;
+  // The SVG's viewBox used to be a fixed 300×92 regardless of how wide the
+  // card actually rendered (up to ~1600px+ on a large desktop window, per
+  // .center-screen's responsive max-width). With preserveAspectRatio="none"
+  // stretching that fixed coordinate space to fill the real box, the x and y
+  // axes ended up scaled by very different factors — text glyphs, the
+  // stroke, and the point circles all got stretched noticeably wider than
+  // tall, which is the "looks weird" distortion. Measuring the actual
+  // container width and using it as the viewBox width (with a viewBox
+  // height that matches the CSS height 1:1) keeps the coordinate space's
+  // scale factor at 1 in both directions, so nothing stretches no matter
+  // how wide the card is.
+  const containerRef = useRef(null);
+  const [measuredWidth, setMeasuredWidth] = useState(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => setMeasuredWidth(el.getBoundingClientRect().width);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const width = measuredWidth || 300;
+  const height = 100;
+  const topPad = 22;
+  const bottomPad = 20;
+  const sidePad = 10;
   const plotHeight = height - topPad - bottomPad;
   const plotWidth = width - sidePad * 2;
 
@@ -944,20 +1118,31 @@ function WpmChart({ data, color }) {
   const areaPath = `${linePath} L${points[points.length - 1].x},${baselineY} L${points[0].x},${baselineY} Z`;
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="wpm-chart" preserveAspectRatio="none">
-      <path d={areaPath} fill={color} opacity={0.12} stroke="none" />
-      <path d={linePath} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
-      {points.map((p, i) => (
-        <g key={i}>
-          <circle cx={p.x} cy={p.y} r={3} style={{ fill: "var(--card-solid)" }} stroke={color} strokeWidth={2} />
-          <text x={p.x} y={Math.max(9, p.y - 7)} textAnchor="middle" className="wpm-chart-value">
-            {p.wpm}
-          </text>
-          <text x={p.x} y={height - 3} textAnchor="middle" className="wpm-chart-label">
-            {p.label}
-          </text>
-        </g>
-      ))}
-    </svg>
+    <div ref={containerRef} style={{ width: "100%" }}>
+      {measuredWidth > 0 ? (
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="wpm-chart">
+          <path d={areaPath} fill={color} opacity={0.12} stroke="none" />
+          <path
+            d={linePath}
+            fill="none"
+            stroke={color}
+            strokeWidth={2.5}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+          {points.map((p, i) => (
+            <g key={i}>
+              <circle cx={p.x} cy={p.y} r={3.5} style={{ fill: "var(--card-solid)" }} stroke={color} strokeWidth={2} />
+              <text x={p.x} y={Math.max(12, p.y - 10)} textAnchor="middle" className="wpm-chart-value">
+                {p.wpm}
+              </text>
+              <text x={p.x} y={height - 5} textAnchor="middle" className="wpm-chart-label">
+                {p.label}
+              </text>
+            </g>
+          ))}
+        </svg>
+      ) : null}
+    </div>
   );
 }

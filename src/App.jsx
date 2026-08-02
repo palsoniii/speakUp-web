@@ -17,6 +17,7 @@ import { TAB_ICONS } from "./lib/icons";
 import { useTheme } from "./lib/theme";
 import { getSession, onAuthStateChange, signOut } from "./lib/auth";
 import { supabaseConfigured } from "./lib/supabaseClient";
+import { reportError } from "./lib/errorMonitoring";
 
 const TABS = [
   { id: "home", label: "Home" },
@@ -55,7 +56,20 @@ export default function App() {
 
   useEffect(() => {
     if (!supabaseConfigured) return;
-    getSession().then(setSession);
+    // Without a .catch, a failed initial session check (network drop, Auth
+    // service hiccup) left `session` stuck at `undefined` forever — the
+    // "still resolving" branch below renders an empty <div className=
+    // "app-shell" /> with no error, no retry, and no visible reason why, so
+    // the entire app would just look permanently blank. Falling back to
+    // `null` (the same state as "confirmed signed out") means the worst
+    // case is landing on the sign-in page instead of a dead blank screen —
+    // an actual dead end a person could only escape by guessing to reload.
+    getSession()
+      .then(setSession)
+      .catch((err) => {
+        reportError(err, "App.getSession");
+        setSession(null);
+      });
     return onAuthStateChange((event, nextSession) => {
       if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
       setSession(nextSession);
@@ -190,7 +204,7 @@ export default function App() {
       )}
 
       {flowStep === "reflect" && activeExercise && recording && (
-        <Reflect exercise={activeExercise} recording={recording} onSaved={handleSaved} />
+        <Reflect exercise={activeExercise} recording={recording} onSaved={handleSaved} onDiscard={exitFlow} />
       )}
 
       {flowStep === "celebrate" && celebration && (

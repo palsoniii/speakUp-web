@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Globe, Pause, Play } from "lucide-react";
-import { Body, Button, Card, FeelingMarks, IconBadge, Label, Pill, Tabs, Title } from "../components/UI";
+import { Body, Button, Card, FeelingMarks, IconBadge, Label, LoadErrorNote, Pill, Tabs, Title } from "../components/UI";
 import { EXERCISE_TYPES, getExerciseType } from "../lib/content";
 import { EXERCISE_ICONS } from "../lib/icons";
 import { tokenizeFillers } from "../lib/analysis";
 import { getSessions } from "../lib/storage";
+import { reportError } from "../lib/errorMonitoring";
 
 const FEELING_WORDS = ["", "rough", "okay", "good", "great"];
 const MIN_TREND_SESSIONS = 3;
@@ -12,21 +13,39 @@ const MIN_TREND_SESSIONS = 3;
 export default function Progress({ refreshKey, onStartExercise }) {
   const [progressTab, setProgressTab] = useState("trends");
   const [sessions, setSessions] = useState([]);
+  // `sessions` has no cache to fall back on (unlike Home/Badges) — it starts
+  // at [] every mount, so a failed fetch here used to be indistinguishable
+  // from a genuinely new account: Trends showed "need three sessions" and
+  // History showed "no sessions yet" even for someone with months of real
+  // history, with no error and nothing telling them their data wasn't
+  // actually gone, just unreachable right now.
+  const [loadError, setLoadError] = useState(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    getSessions().then((data) => {
-      if (!cancelled) setSessions(data);
-    });
+    getSessions()
+      .then((data) => {
+        if (cancelled) return;
+        setSessions(data);
+        setLoadError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        reportError(err, "Progress.getSessions");
+        setLoadError(err?.message || "Couldn't load your session history — check your connection and try again.");
+      });
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [refreshKey, retryTick]);
 
   return (
     <div className="screen">
       <Label>YOUR PROGRESS</Label>
       <Title>The long game</Title>
+
+      <LoadErrorNote message={loadError} onRetry={() => setRetryTick((t) => t + 1)} style={{ marginTop: 12 }} />
 
       <div style={{ marginTop: 16 }}>
         <Tabs

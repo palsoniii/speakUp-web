@@ -1599,15 +1599,15 @@ textarea.note-input::placeholder {
 }
 
 .wpm-chart-label {
-  font-size: 7px;
+  font-size: 10px;
   fill: var(--faint);
   font-weight: 700;
 }
 
 .wpm-chart-value {
-  font-size: 8px;
+  font-size: 11px;
   fill: var(--text);
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .structure-label-row {

@@ -80,8 +80,10 @@ export default function Prep({ exercise, onProceed, onCancel }) {
           </svg>
           <span className="timer-number">{secondsLeft}</span>
         </div>
-        <Body className="dim" style={{ marginTop: 4, textAlign: "center", maxWidth: "26em" }}>
-          Sketch a first line, a middle, and a landing. Don't write a script — you won't get to read it.
+        <Body className="dim" style={{ marginTop: 24, textAlign: "center", maxWidth: "26em" }}>
+          {exercise.id === "explain_simply"
+            ? "This one gives you extra time — look the topic up and read a bit online if you need to, then sketch a first line, a middle, and a landing. Don't write a script — you won't get to read it."
+            : "Sketch a first line, a middle, and a landing. Don't write a script — you won't get to read it."}
         </Body>
       </div>
 

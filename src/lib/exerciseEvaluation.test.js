@@ -24,7 +24,7 @@ describe("evaluateExercise: unknown type", () => {
 describe("evaluateExercise: explain_simply", () => {
   const exercise = { id: "explain_simply", word: null, pair: null };
 
-  it("scores plain, analogy-heavy language highly and flags nothing as jargon", () => {
+  it("catches analogy-style language as evidence and flags nothing as jargon", () => {
     const transcript =
       "Okay so imagine your phone is like a tiny mailman. It's kind of like a friend who runs really fast.";
     const result = evaluateExercise("explain_simply", {
@@ -36,10 +36,13 @@ describe("evaluateExercise: explain_simply", () => {
     expect(result.label).toBe("Simplicity");
     expect(result.goodChips.length).toBeGreaterThan(0);
     expect(result.badChips).toHaveLength(0);
-    expect(result.score).toBeGreaterThan(70);
+    // No composite score/breakdown anymore — the AI judgment (a separate
+    // call, not this module) is the real read; this is unscored evidence.
+    expect(result.score).toBeUndefined();
+    expect(result.breakdown).toBeUndefined();
   });
 
-  it("dings jargon-heavy, high-syllable language", () => {
+  it("flags jargon-heavy language as evidence", () => {
     const transcript =
       "This mechanism necessitates a comprehensive methodology to facilitate the theoretical framework.";
     const result = evaluateExercise("explain_simply", {
@@ -49,14 +52,13 @@ describe("evaluateExercise: explain_simply", () => {
       exercise,
     });
     expect(result.badChips.length).toBeGreaterThan(0);
-    expect(result.score).toBeLessThan(40);
   });
 });
 
 describe("evaluateExercise: snap_opinion", () => {
   const exercise = { id: "snap_opinion" };
 
-  it("rewards an early clear stance with reasoning", () => {
+  it("catches reasoning/support phrases as evidence", () => {
     const transcript =
       "I think remote work is better because it saves commute time, and for example people are happier.";
     const result = evaluateExercise("snap_opinion", {
@@ -65,10 +67,11 @@ describe("evaluateExercise: snap_opinion", () => {
       exercise,
     });
     expect(result.label).toBe("Persuasion");
-    expect(result.score).toBeGreaterThan(60);
+    expect(result.goodChips.length).toBeGreaterThan(0);
+    expect(result.score).toBeUndefined();
   });
 
-  it("penalizes hedging with no clear stance", () => {
+  it("flags hedging phrases as evidence", () => {
     const transcript = "Maybe it's kind of good, I guess, not sure, sort of depends I think maybe.";
     const result = evaluateExercise("snap_opinion", {
       transcript,
@@ -76,14 +79,13 @@ describe("evaluateExercise: snap_opinion", () => {
       exercise,
     });
     expect(result.badChips.length).toBeGreaterThan(0);
-    expect(result.score).toBeLessThan(40);
   });
 });
 
 describe("evaluateExercise: wiki_roulette (Reflection Roulette)", () => {
   const exercise = { id: "wiki_roulette" };
 
-  it("rewards first-person, emotionally grounded language", () => {
+  it("catches sensory/emotional language as evidence and counts personal pronouns", () => {
     const transcript =
       "I remember how I felt that day — my heart was warm and I still miss it, it makes me feel grateful.";
     const result = evaluateExercise("wiki_roulette", {
@@ -92,17 +94,20 @@ describe("evaluateExercise: wiki_roulette (Reflection Roulette)", () => {
       exercise,
     });
     expect(result.label).toBe("Reflection");
-    expect(result.score).toBeGreaterThan(60);
+    expect(result.goodChips.length).toBeGreaterThan(0);
+    expect(result.metrics[0].value).toBeGreaterThan(0);
+    expect(result.score).toBeUndefined();
   });
 
-  it("scores low for detached, third-person, unemotional language", () => {
+  it("finds no sensory-word evidence for detached, third-person language", () => {
     const transcript = "People generally consider this topic to be relevant across many contexts and situations.";
     const result = evaluateExercise("wiki_roulette", {
       transcript,
       wordCount: transcript.split(/\s+/).length,
       exercise,
     });
-    expect(result.score).toBeLessThan(30);
+    expect(result.goodChips).toHaveLength(0);
+    expect(result.metrics[0].value).toBe(0);
   });
 });
 

@@ -12,9 +12,24 @@
 // SpeakUp users can spend our Groq transcription quota.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+
+// Auto-injected into every Edge Function's environment — see the same note
+// in ai-feedback/index.ts.
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+// Per-signed-in-user caps — see check_rate_limit() in supabase/schema.sql.
+// Unlike ai-feedback, a completed session normally costs exactly ONE call
+// here (only when the local whisper-server isn't running — see
+// src/lib/whisper.js), so 20/day is already 4x the "5 sessions a day"
+// floor this app is sized for at ~55 users, while still keeping any single
+// account to 1% of Groq's 2,000/day free-tier transcription bucket.
+const RATE_LIMIT_PER_MINUTE = 5;
+const RATE_LIMIT_PER_DAY = 20;
 
 // Free-tier, fast, and — crucially — same as the local server's default
 // verbatim behavior: no aggressive disfluency cleanup, so filler words this
@@ -59,6 +74,32 @@ Deno.serve(async (req: Request) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // Per-user throttle — see the matching block + comment in
+    // ai-feedback/index.ts for why this forwards the caller's own JWT
+    // (scopes the count to this one account) and fails open on an infra
+    // error rather than blocking transcription outright.
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+    });
+    const { data: limitResult, error: limitError } = await userClient.rpc("check_rate_limit", {
+      p_function: "transcribe",
+      p_max_per_minute: RATE_LIMIT_PER_MINUTE,
+      p_max_per_day: RATE_LIMIT_PER_DAY,
+    });
+    if (limitError) {
+      console.error("check_rate_limit failed, allowing request through:", limitError.message);
+    } else if (limitResult !== "ok") {
+      const message =
+        limitResult === "minute"
+          ? "You're requesting transcription a little fast — wait a few seconds and try again."
+          : "You've reached today's transcription limit for your account (there's plenty left for everyone else) — it resets at midnight UTC.";
+      return new Response(JSON.stringify({ error: message, code: "rate_limited", scope: limitResult }), {
+        status: 429,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // SpeakUp's exercise prompt / target word, passed through as Whisper's
     // initial prompt so it's primed toward that vocabulary — identical intent
     // to the local server's `context` param (see whisper-server/server.py).

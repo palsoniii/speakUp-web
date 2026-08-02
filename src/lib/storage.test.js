@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { computeFeedbackTrend, computeStats, computeStreak, didCompleteToday } from "./storage";
+import {
+  computeFeedbackTrend,
+  computeStats,
+  computeStreak,
+  didCompleteToday,
+  filterUnspokenTopics,
+  topicIdentityKey,
+} from "./storage";
 
 // getSessions/addSession/getSettings/setSettings are now real Supabase
 // network calls (see the Supabase migration — sessions/settings live in
@@ -67,6 +74,56 @@ describe("didCompleteToday", () => {
   it("true only if a session exists dated today", () => {
     expect(didCompleteToday([{ date: isoDaysAgo(1) }])).toBe(false);
     expect(didCompleteToday([{ date: isoDaysAgo(0) }])).toBe(true);
+  });
+});
+
+describe("topicIdentityKey", () => {
+  it("keys word_of_day entries by word, case/whitespace-insensitively", () => {
+    expect(topicIdentityKey("word_of_day", { word: "  Pragmatic " })).toBe("pragmatic");
+    expect(topicIdentityKey("word_of_day", { word: null })).toBeNull();
+  });
+
+  it("keys every other category by exact prompt text", () => {
+    expect(topicIdentityKey("wiki_roulette", { prompt: "Talk about a pet." })).toBe("Talk about a pet.");
+    expect(topicIdentityKey("word_ladder", { prompt: 'Connect "a" and "b".' })).toBe('Connect "a" and "b".');
+  });
+});
+
+describe("filterUnspokenTopics", () => {
+  const bank = [{ prompt: "A" }, { prompt: "B" }, { prompt: "C" }];
+
+  it("returns the full bank untouched when nothing has been spoken", () => {
+    const result = filterUnspokenTopics("wiki_roulette", bank, new Set());
+    expect(result).toEqual({ entries: bank, exhausted: false });
+  });
+
+  it("excludes only entries whose prompt was already saved", () => {
+    const result = filterUnspokenTopics("wiki_roulette", bank, new Set(["B"]));
+    expect(result.entries.map((e) => e.prompt)).toEqual(["A", "C"]);
+    expect(result.exhausted).toBe(false);
+  });
+
+  it("does NOT exclude an entry just because it was spun — only isDuplicate keys ever get to spokenKeys, which only ever come from real saved sessions", () => {
+    // i.e. this function has no notion of "spun but not saved" at all —
+    // it only ever sees what getSpokenTopicKeys pulled from `sessions`,
+    // which only gets a row on an actual save (see Reflect.jsx's save()).
+    const result = filterUnspokenTopics("wiki_roulette", bank, new Set());
+    expect(result.entries).toHaveLength(3);
+  });
+
+  it("falls back to the full bank (and reports exhausted) once every entry has been saved", () => {
+    const result = filterUnspokenTopics("wiki_roulette", bank, new Set(["A", "B", "C"]));
+    expect(result.entries).toEqual(bank);
+    expect(result.exhausted).toBe(true);
+  });
+
+  it("matches word_of_day entries by word, not prompt", () => {
+    const vocabBank = [
+      { word: "Ephemeral", prompt: "Talk about something ephemeral." },
+      { word: "Ubiquitous", prompt: "Describe something ubiquitous." },
+    ];
+    const result = filterUnspokenTopics("word_of_day", vocabBank, new Set(["ephemeral"]));
+    expect(result.entries.map((e) => e.word)).toEqual(["Ubiquitous"]);
   });
 });
 

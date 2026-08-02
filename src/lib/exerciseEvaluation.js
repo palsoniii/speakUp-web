@@ -6,9 +6,23 @@
 // plus on the Words tab and a *minus* here on Explain It Simply, because
 // explaining something to a five-year-old is the opposite skill from
 // sounding impressive — that's the whole reason this file exists as its own
-// thing rather than folding into analysis.js. Same rule-based,
-// recomputable-by-hand philosophy: curated word lists and counts, no
-// opaque model judgment.
+// thing rather than folding into analysis.js.
+//
+// This used to also produce a composite 0-100 "grade" (plainScore,
+// jargonScore, stanceScore, etc.) built purely from summing hits against the
+// word/phrase lists below — that's exactly the blind spot this app is
+// trying to get away from: phrase it differently than the list anticipated
+// and it doesn't register, so two equally good answers could score
+// differently by luck of vocabulary. That composite number was never even
+// the headline in the UI (aiCoach.js's model-driven getExerciseFitAiFeedback
+// score already was — see Reflect.jsx's ExerciseFitPanel), so removing it
+// isn't taking away something users relied on, just a second, quieter,
+// list-gated number that implied more rigor than it had. What's left here is
+// unscored: the same curated word/phrase lists, still scanned for and still
+// shown, but as evidence chips for a human (or the model) to read — not a
+// grade of their own. word_of_day/word_ladder are the one place a literal
+// list-membership check IS the right tool (the exercise itself defines a
+// single target word/pair), so those two keep their exact-match scoring.
 
 import { countOccurrences, scanWordList } from "./analysis";
 
@@ -41,12 +55,11 @@ const SIMPLIFIER_MARKERS = [
   "put simply", "simply put", "let's say", "say you", "you know how",
 ];
 
-// Snap Opinion: does it read as an actual stance, not a survey of options.
-const STANCE_MARKERS = [
-  "i think", "i believe", "in my opinion", "i'd say", "i would say",
-  "my take", "i'm convinced", "personally", "i'd argue", "i would argue",
-  "my opinion is", "i feel that", "for me,",
-];
+// Snap Opinion: reasoning/support and hedge markers, scanned as evidence
+// chips (see the evaluateSnapOpinion comment above — the actual "did they
+// take a clear stance early" judgment now comes from the model, which can
+// read a stance phrased any way, not just via a fixed list of stance
+// phrases like "i think"/"in my opinion").
 const REASONING_MARKERS = [
   "because", "since", "the reason", "for example", "for instance",
   "which means", "that's why", "this is why", "due to", "as a result",
@@ -97,74 +110,41 @@ function sumCounts(scan) {
 // --- Per-exercise evaluators ------------------------------------------
 
 function evaluateExplainSimply(ctx) {
-  const { lowerClean, avgSyllablesPerWord } = ctx;
+  const { lowerClean } = ctx;
   const jargon = scanWordList(lowerClean, JARGON_WORDS);
   const simplifiers = scanWordList(lowerClean, SIMPLIFIER_MARKERS);
-
-  const plainScore =
-    avgSyllablesPerWord <= 1.35 ? 40 : avgSyllablesPerWord <= 1.55 ? 32 : avgSyllablesPerWord <= 1.8 ? 20 : 10;
-  const jargonScore = Math.max(0, 30 - jargon.total * 10);
-  const relateScore = Math.min(30, simplifiers.total * 10);
-
-  const breakdown = [
-    { label: "Plain wording", points: plainScore, max: 40 },
-    { label: "No jargon", points: jargonScore, max: 30 },
-    { label: "Relatable comparisons", points: relateScore, max: 30 },
-  ];
-  const score = breakdown.reduce((s, b) => s + b.points, 0);
 
   return {
     label: "Simplicity",
     heading: "Simplicity check",
     intro:
-      'Specific to Explain It Simply: this rewards plain wording and analogies, and marks down the kind of formal, academic words that don\'t belong in an explanation for a five-year-old — even though some of those same words count as "power words" on the Words tab.',
-    score,
-    scoreLabel: "out of 100 · plain wording, no jargon, relatable comparisons",
-    breakdown,
-    badChipsLabel: "Words too heavy for this exercise",
+      "Specific to Explain It Simply: the AI judgment above is the real read on whether this actually explains the thing plainly and correctly. These are just the formal/academic words and analogy-style phrases a quick scan happened to catch — evidence, not a grade of their own, since plenty of jargon-free or analogy-rich answers won't use exactly these words.",
+    badChipsLabel: "Formal/academic words a quick scan caught",
     badChips: jargon.words,
-    badEmptyNote: "No jargon detected — nicely plain.",
-    goodChipsLabel: "Simplifying language you used",
+    badEmptyNote: "No jargon-list words detected.",
+    goodChipsLabel: "Simplifying language a quick scan caught",
     goodChips: simplifiers.words,
-    goodEmptyNote: 'No analogy or "in other words"-style language detected — try "it\'s like…" or "imagine…" next time.',
+    goodEmptyNote: 'No listed analogy phrase like "it\'s like…" or "imagine…" detected — that doesn\'t mean you didn\'t simplify it, just that this scan is narrow.',
   };
 }
 
 function evaluateSnapOpinion(ctx) {
   const { lowerClean } = ctx;
-  const stance = scanWordList(lowerClean, STANCE_MARKERS);
   const reasoning = scanWordList(lowerClean, REASONING_MARKERS);
   const concession = scanWordList(lowerClean, CONCESSION_MARKERS);
   const hedge = scanWordList(lowerClean, HEDGE_MARKERS);
-
-  const firstChunk = lowerClean.split(/\s+/).slice(0, 20).join(" ");
-  const stanceEarly = STANCE_MARKERS.some((m) => countOccurrences(firstChunk, m) > 0);
-
-  const stanceScore = stanceEarly ? 35 : stance.total > 0 ? 20 : 0;
-  const supportScore = Math.min(35, (reasoning.total + concession.total) * 9);
-  const firmnessScore = Math.max(0, 30 - hedge.total * 8);
-
-  const breakdown = [
-    { label: "Clear stance", points: stanceScore, max: 35 },
-    { label: "Reasoning & support", points: supportScore, max: 35 },
-    { label: "Firmness", points: firmnessScore, max: 30 },
-  ];
-  const score = breakdown.reduce((s, b) => s + b.points, 0);
 
   return {
     label: "Persuasion",
     heading: "Persuasion check",
     intro:
-      "Specific to Snap Opinion: this looks for a clear side taken early, reasons backing it up, and how much hedging softened it — not vocabulary or pacing, which are already covered on the other tabs.",
-    score,
-    scoreLabel: "out of 100 · stance, reasoning, firmness",
-    breakdown,
-    badChipsLabel: "Hedging that softened your stance",
+      "Specific to Snap Opinion: the AI judgment above is the real read on whether you actually took a side and whether the reasoning holds up. These are just the hedging and reasoning/support phrases a quick scan happened to catch — a stance phrased without any of these exact words won't show up here even if it's a perfectly clear stance.",
+    badChipsLabel: "Hedging a quick scan caught",
     badChips: hedge.words,
-    badEmptyNote: "No hedging detected — you committed to a side.",
-    goodChipsLabel: "Reasoning & nuance markers",
+    badEmptyNote: "No listed hedge phrases detected.",
+    goodChipsLabel: "Reasoning & nuance markers a quick scan caught",
     goodChips: [...reasoning.words, ...concession.words],
-    goodEmptyNote: 'No "because" / "for example"-style support detected — back your stance with a reason next time.',
+    goodEmptyNote: 'No listed "because" / "for example"-style phrase detected — that doesn\'t mean there\'s no reasoning, just that this scan is narrow.',
   };
 }
 
@@ -174,31 +154,31 @@ function evaluatePersonalDepth(ctx) {
   const pronounHits = countTokenMatches(tokens, PERSONAL_PRONOUNS);
   const pronounTotal = sumCounts(pronounHits);
   const sensory = scanWordList(lowerClean, EMOTION_SENSORY_WORDS);
-
   const pronounRate = wordCount > 0 ? (pronounTotal / wordCount) * 100 : 0;
-  const voiceScore = pronounRate >= 6 ? 50 : pronounRate >= 3 ? 38 : pronounRate >= 1 ? 22 : 8;
-  const sensoryScore = Math.min(50, sensory.total * 10);
-
-  const breakdown = [
-    { label: "Personal voice", points: voiceScore, max: 50 },
-    { label: "Sensory / emotional detail", points: sensoryScore, max: 50 },
-  ];
-  const score = breakdown.reduce((s, b) => s + b.points, 0);
 
   return {
     label: "Reflection",
     heading: "Personal depth check",
     intro:
-      "Specific to Reflection Roulette: this rewards speaking in first person and grounding the answer in real sensory or emotional detail — the actual point of this exercise, unlike the more argumentative or informational ones.",
-    score,
-    scoreLabel: "out of 100 · personal voice, sensory/emotional detail",
-    breakdown,
-    metrics: [{ label: "Personal pronouns (I / me / my)", value: `${pronounTotal} · ${Math.round(pronounRate * 10) / 10}/100 words` }],
+      "Specific to Reflection Roulette: the AI judgment above is the real read on whether this is genuinely personal and specific, not generic. Personal-pronoun rate is an honest objective count (below); the sensory/emotional words are just what a quick scan happened to catch — plenty of genuinely personal, vivid answers won't use exactly these words.",
+    // `value` renders large and bold (see Reflect.jsx's ExerciseFitPanel) —
+    // it used to be a combined "9 · 9.8/100 words" string, which at that
+    // size and weight reads like a misplaced-decimal number ("9.9.8")
+    // rather than "9 uses, a rate of 9.8". Keeping value a single plain
+    // number (matching how every other exercise's metrics render — see
+    // evaluateWordLadder/evaluateWordOfDay below) and folding the rate into
+    // the label instead removes the ambiguity.
+    metrics: [
+      {
+        label: `Personal pronouns (I / me / my) — ${Math.round(pronounRate * 10) / 10} per 100 words`,
+        value: pronounTotal,
+      },
+    ],
     badChipsLabel: null,
     badChips: [],
-    goodChipsLabel: "Sensory & emotional language",
+    goodChipsLabel: "Sensory & emotional language a quick scan caught",
     goodChips: sensory.words,
-    goodEmptyNote: 'None detected — words like "felt", "remember", or naming an emotion would count here.',
+    goodEmptyNote: 'None detected — that\'s a narrow list (words like "felt", "remember"), not a verdict on how personal this was.',
   };
 }
 

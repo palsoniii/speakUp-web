@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { getContentBank } from "./content";
 
 // All persistence now goes through Supabase (Postgres + Storage), scoped to
 // the signed-in account via Row Level Security — see supabase/schema.sql.
@@ -26,11 +27,8 @@ import { supabase } from "./supabaseClient";
 // renders immediately and just re-renders with the real values a moment
 // later, same pattern Home/Badges already use for their own async data.
 export const DEFAULT_SETTINGS = {
-  reminderEnabled: false,
-  reminderHour: 9,
-  reminderMinute: 0,
   speechFeedbackEnabled: true,
-  aiFeedbackModel: "llama-3.3-70b-versatile",
+  aiFeedbackModel: "openai/gpt-oss-120b",
   displayName: "",
   age: null,
 };
@@ -78,9 +76,6 @@ function sessionFromRow(row) {
 function settingsFromRow(row) {
   if (!row) return { ...DEFAULT_SETTINGS };
   return {
-    reminderEnabled: row.reminder_enabled,
-    reminderHour: row.reminder_hour,
-    reminderMinute: row.reminder_minute,
     speechFeedbackEnabled: row.speech_feedback_enabled,
     aiFeedbackModel: row.ai_feedback_model,
     displayName: row.display_name || "",
@@ -128,6 +123,140 @@ export async function addSession(session) {
   return sessionFromRow(data);
 }
 
+// --- Roulette "already spoken on and saved" exclusion ---
+//
+// A topic should stop appearing in a profile's roulette once they've
+// actually saved a session on it (Reflect.jsx's save(), the only place
+// addSession() gets called) — spinning past it, or discarding without
+// saving, must NOT remove it. Since `sessions` already records exactly
+// that (one row per real save, with `type_id`/`prompt`/`word`), there's
+// nothing new to persist: this just reads what's already there and
+// filters the content bank against it.
+//
+// Every category is identified by its exact prompt text (matches
+// content.js's getContentBank output verbatim — confirmed against real
+// saved rows), except word_of_day, which is identified by the word
+// itself. The word is the more stable key there: it's a short, stable
+// token the rest of the app already treats as the entry's identity
+// (session.word), whereas the prompt sentence for a word is free-form
+// text that a future content edit could easily reword without changing
+// which vocab word it's teaching.
+export function topicIdentityKey(typeId, { prompt, word }) {
+  if (typeId === "word_of_day") return word ? word.toLowerCase().trim() : null;
+  return prompt || null;
+}
+
+// Pure filtering step, split out from getFreshContentBank so it's testable
+// without mocking Supabase (same split this file already uses for
+// computeStreak/computeStats vs. getSessions). `spokenKeys` is whatever
+// getSpokenTopicKeys resolved to. `exhausted: true` means every entry in
+// the bank has already been saved, so nothing could be filtered without
+// leaving zero options — falls back to the full bank rather than breaking,
+// and says so, so the caller can tell the user instead of silently
+// repeating a "fresh" spin that isn't.
+export function filterUnspokenTopics(typeId, bank, spokenKeys) {
+  if (!spokenKeys || spokenKeys.size === 0) return { entries: bank, exhausted: false };
+
+  const fresh = bank.filter((entry) => {
+    const key = topicIdentityKey(typeId, entry);
+    return key ? !spokenKeys.has(key) : true;
+  });
+
+  return fresh.length > 0 ? { entries: fresh, exhausted: false } : { entries: bank, exhausted: true };
+}
+
+// getCurrentUserId's supabase.auth.getUser() re-validates the JWT against
+// the Auth server on every call — the right call for a write (addSession,
+// setSettings) but an extra network round trip this read doesn't need:
+// getSpokenTopicKeys ran it, then made a second round trip for the actual
+// query, back to back, on every single Roulette screen load — a big chunk
+// of why the roulette was slow to show real content. getSession() resolves
+// from the locally-stored session instead (no network call in the normal
+// case), and that's enough here: RLS on `sessions` enforces access by
+// auth.uid() server-side regardless of what id we filter by client-side, so
+// there's no security reason to pay for the extra validation on a read.
+async function getSessionUserIdFast() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data?.session?.user) throw new Error("Not signed in.");
+  return data.session.user.id;
+}
+
+// The set of topic keys (see topicIdentityKey) this user has already saved
+// a session for, within one exercise type.
+export async function getSpokenTopicKeys(typeId) {
+  const userId = await getSessionUserIdFast();
+  const { data, error } = await supabase
+    .from("sessions")
+    .select("prompt, word")
+    .eq("user_id", userId)
+    .eq("type_id", typeId);
+  if (error) throw error;
+  const keys = new Set();
+  for (const row of data || []) {
+    const key = topicIdentityKey(typeId, row);
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+// Per-typeId in-memory cache for the DB-backed content bank (see
+// fetchContentBankFromDb below) — avoids re-querying content_bank on every
+// roulette spin within one page load. The bank changes at most a few times
+// a week (generate-content's batch runs), so a stale copy for the rest of
+// one session is a non-issue; a full page reload clears it naturally.
+const contentBankCache = new Map();
+
+// content_bank is shared, growing reference data (see
+// supabase/schema.sql's content_bank table and the redesign plan doc) —
+// content.js's static arrays are now the SEED for that table and the
+// fallback if it's ever empty or unreachable, not the primary source. This
+// is the one place that fallback decision gets made, so every caller (just
+// getFreshContentBank below) gets it automatically rather than needing to
+// know the DB table exists at all.
+async function fetchContentBankFromDb(typeId) {
+  if (contentBankCache.has(typeId)) return contentBankCache.get(typeId);
+  const { data, error } = await supabase.from("content_bank").select("entry").eq("type_id", typeId).eq("active", true);
+  if (error) throw error;
+  const bank = (data || []).map((row) => row.entry);
+  contentBankCache.set(typeId, bank);
+  return bank;
+}
+
+// This category's full content bank with every already-saved topic
+// filtered out, for the Roulette screen to spin across. Reads from
+// content_bank first (so the bank can grow over time via generate-content
+// without a client release) and falls back to content.js's static arrays —
+// fail open, same "don't block the roulette" spirit as the topic-filtering
+// catch below — if the table is empty (e.g. seed hasn't run on this
+// project) or unreachable (network hiccup, not signed in yet).
+export async function getFreshContentBank(typeId) {
+  let bank;
+  try {
+    const dbBank = await fetchContentBankFromDb(typeId);
+    bank = dbBank.length > 0 ? dbBank : getContentBank(typeId);
+  } catch (e) {
+    // Deliberately fails open to the static bank rather than blocking the
+    // roulette — content is content either way, so this isn't worth a user-
+    // visible error. Logged so "why does content feel repetitive/stale"
+    // (a plausible complaint if the DB bank is silently never being read)
+    // is traceable rather than invisible.
+    console.warn(`getFreshContentBank(${typeId}): content_bank fetch failed, using static fallback:`, e);
+    bank = getContentBank(typeId);
+  }
+  try {
+    const spokenKeys = await getSpokenTopicKeys(typeId);
+    return filterUnspokenTopics(typeId, bank, spokenKeys);
+  } catch (e) {
+    // Not signed in yet, or a network hiccup — fail open to the unfiltered
+    // bank rather than blocking the roulette from working at all. Logged
+    // for the same reason as above: this is the mechanism behind "already
+    // spoken" topics getting excluded, so a silent failure here would look
+    // like a real bug (repeat prompts) with no trace of the actual cause.
+    console.warn(`getFreshContentBank(${typeId}): couldn't load spoken-topic history, showing unfiltered bank:`, e);
+    return { entries: bank, exhausted: false };
+  }
+}
+
 // Uploads to <user_id>/<session_id>.webm, matching the path shape
 // supabase/schema.sql's storage policies check against auth.uid(). Returns
 // a public URL — see the tradeoff noted in schema.sql (unlisted, not truly
@@ -157,9 +286,6 @@ export async function setSettings(partial) {
   const merged = { ...current, ...partial };
   const row = {
     user_id: userId,
-    reminder_enabled: merged.reminderEnabled,
-    reminder_hour: merged.reminderHour,
-    reminder_minute: merged.reminderMinute,
     speech_feedback_enabled: merged.speechFeedbackEnabled,
     ai_feedback_model: merged.aiFeedbackModel,
     display_name: merged.displayName || null,

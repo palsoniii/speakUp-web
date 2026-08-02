@@ -104,8 +104,12 @@ export function IconBadge({ icon: Icon, color, size = 34 }) {
   );
 }
 
-export function Label({ children }) {
-  return <div className="label">{children}</div>;
+export function Label({ children, style }) {
+  return (
+    <div className="label" style={style}>
+      {children}
+    </div>
+  );
 }
 
 export function Title({ children, style }) {
@@ -187,6 +191,26 @@ export function ThemeToggle({ theme, onToggle, style }) {
     >
       <span style={{ opacity: 0 }}>{theme === "dark" ? <Moon size={1} /> : <Sun size={1} />}</span>
     </button>
+  );
+}
+
+// Inline "this background fetch/save failed" note, shared by every screen
+// that loads or saves data outside the main practice flow (Home, Progress,
+// Badges, Settings). These all used to fail completely silently — a
+// rejected promise with no `.catch` left the screen sitting on stale or
+// zeroed numbers with zero indication anything was wrong, which is exactly
+// the kind of thing that shows up as a confusing user complaint with no
+// trace to follow. This renders the actual error text (so a complaint can
+// be matched to a real cause) plus an optional retry.
+export function LoadErrorNote({ message, onRetry, style }) {
+  if (!message) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", ...style }}>
+      <Body className="ai-feedback-error" style={{ margin: 0 }}>
+        {message}
+      </Body>
+      {onRetry ? <TextButton title="Retry" onClick={onRetry} /> : null}
+    </div>
   );
 }
 

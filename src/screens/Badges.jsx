@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Body, Card, Label, Title } from "../components/UI";
+import { Body, Card, Label, LoadErrorNote, Title } from "../components/UI";
 import { BADGE_ICONS } from "../lib/icons";
 import { BADGE_DEFS, computeBadges } from "../lib/badges";
 import { computeStats, getSessions } from "../lib/storage";
+import { reportError } from "../lib/errorMonitoring";
 
 // Purely presentational "how far away is this" text — the earned/locked
 // truth still comes entirely from computeBadges() in lib/badges.js; this
@@ -82,6 +83,13 @@ export default function Badges({ refreshKey, user }) {
   // Same as `statsLoaded` on Home — a cached snapshot counts as already
   // loaded so the summary line doesn't say "Loading…" over real numbers.
   const [loading, setLoading] = useState(!cached);
+  // Previously this fetch had no .catch — the `.finally` still flipped
+  // `loading` to false on failure (so the screen didn't hang on "Loading…"
+  // forever), but it silently fell through to whatever the cache (or the
+  // all-locked defaults, on a first-ever visit) had, with no indication
+  // that the "earned"/"locked" state on screen might not be current.
+  const [loadError, setLoadError] = useState(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +102,13 @@ export default function Badges({ refreshKey, user }) {
         setExploredCount(explored);
         setStats(s);
         setBadges(b);
+        setLoadError(null);
         saveCachedBadges(user?.id, { badges: b, stats: s, exploredCount: explored });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        reportError(err, "Badges.getSessions");
+        setLoadError(err?.message || "Couldn't refresh your badges — check your connection and try again.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -102,7 +116,7 @@ export default function Badges({ refreshKey, user }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey, user?.id]);
+  }, [refreshKey, user?.id, retryTick]);
 
   const earnedCount = badges.filter((b) => b.earned).length;
   const nextUp = badges.find((b) => !b.earned);
@@ -116,6 +130,8 @@ export default function Badges({ refreshKey, user }) {
           ? "Loading…"
           : `${earnedCount} of ${badges.length} earned. Locked ones stay visible so the next goal is obvious.`}
       </Body>
+
+      <LoadErrorNote message={loadError} onRetry={() => setRetryTick((t) => t + 1)} style={{ marginTop: 10 }} />
 
       {!loading && nextUp ? (
         <div className="next-up-banner">

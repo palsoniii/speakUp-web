@@ -245,6 +245,14 @@ function ClosingPanel({ onStartFree }) {
           SpeakUp
         </span>
         <span style={{ marginLeft: "auto" }}>For people who have to speak without notes.</span>
+        <span style={{ display: "flex", gap: 14 }}>
+          <a href="/terms.html" target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+            Terms
+          </a>
+          <a href="/privacy.html" target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+            Privacy
+          </a>
+        </span>
       </div>
     </section>
   );
