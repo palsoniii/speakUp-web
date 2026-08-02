@@ -2691,6 +2691,17 @@ textarea.note-input::placeholder {
   text-align: left;
 }
 
+/* .app-logo is inline-flex on its own, but as a direct child of
+   .auth-panel (a column flex container) it gets blockified into a flex
+   item and stretches to the panel's full width by default — so
+   text-align: center on the panel has no effect on it (that property only
+   centers inline content, not a flex item's own box) and the dot+wordmark
+   sits pinned to the left edge instead. align-self: center shrinks it back
+   to its content width and centers that box like the rest of the panel. */
+.auth-panel .app-logo {
+  align-self: center;
+}
+
 /* ------------------------------------------------------------------ */
 /* Responsive: mobile-first, breathe out on wider viewports            */
 /* ------------------------------------------------------------------ */
