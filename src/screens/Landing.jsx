@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { Body, Button, Card, EyebrowPill, Logo, ThemeToggle } from "../components/UI";
 import { EXERCISE_TYPES } from "../lib/content";
+import { useRecorder } from "../lib/recorder";
+import { useSpeechTranscript } from "../lib/speech";
+import { analyzeTranscript } from "../lib/analysis";
 
 const DEMO_PROMPTS = [
   "Talk about a small, ordinary moment from this week you'd want to remember.",
@@ -10,16 +13,40 @@ const DEMO_PROMPTS = [
   "Describe a place that feels sacred to you, even if it's not religious.",
 ];
 
-const CAPTIONS = [
+const SPEAK_SECONDS = 20;
+
+// Only shown if we couldn't get a real live-transcribed line (mic declined,
+// or the browser doesn't support SpeechRecognition) — otherwise the caption
+// during "speaking" is the visitor's own words, live, via the same
+// useSpeechTranscript hook Record.jsx uses for its "live captions" setting.
+const FALLBACK_CAPTIONS = [
   "so I think what grounds me is...",
   "...just a small routine, honestly...",
   "...it's not dramatic, it's just consistent...",
   "and that consistency is what matters to me.",
 ];
 
+// Only shown when we couldn't measure a real result either (same fallback
+// cases as above, or too few words actually came through to analyze) —
+// otherwise these numbers come straight from analyzeTranscript() run
+// against what the visitor actually said, the same pure client-side
+// counting a real saved session gets.
+const SAMPLE_RESULT = {
+  wpm: 142,
+  fillers: 3,
+  articulation: 74,
+  blurb:
+    "Nice pace — you slowed down right where it mattered. Your strongest line was the one about the kitchen table; the opening took a third of your time, so there's your first thing to trim.",
+};
+
 // Signed-out marketing page — the only screen a visitor sees before an
-// account exists. Everything on it (the "try it" demo especially) is
-// simulated: no real microphone access until Prep/Record in the real flow.
+// account exists. The "try it" demo requests a real microphone (same
+// useRecorder/useSpeechTranscript hooks the real Record screen uses) and
+// measures a real result from what the visitor actually says — it just
+// can't run the AI-model "structure" read the real app gets after signup,
+// since that goes through an authenticated Edge Function. If the mic is
+// declined or unsupported, it falls back to a labeled sample instead of
+// silently failing.
 export default function Landing({ theme, onToggleTheme, onSignIn, onStartFree }) {
   return (
     <div className="landing">
@@ -258,18 +285,38 @@ function ClosingPanel({ onStartFree }) {
   );
 }
 
-// Four-state simulated demo: idle -> thinking -> speaking -> result. No real
-// microphone access — this exists purely so a visitor can feel the shape of
-// a session before creating an account.
+// Four-state demo: idle -> thinking -> speaking -> result. "speaking" opens
+// a real microphone (useRecorder, same as Record.jsx) and, where supported,
+// live captions (useSpeechTranscript) — sequenced one after the other like
+// Record.jsx does, since firing both mic requests at once can make Chrome
+// stall negotiating either. "result" runs the visitor's own transcript
+// through the same analyzeTranscript() a real session uses, falling back to
+// a clearly-labeled sample only if the mic was declined, unsupported, or
+// too little was actually said to measure.
 function DemoCard({ onStartFree }) {
   const [state, setState] = useState("idle");
   const [promptIdx, setPromptIdx] = useState(0);
   const [count, setCount] = useState(8);
-  const [speakLeft, setSpeakLeft] = useState(20);
-  const [capIdx, setCapIdx] = useState(0);
+  const [speakLeft, setSpeakLeft] = useState(SPEAK_SECONDS);
+  const [fallbackCapIdx, setFallbackCapIdx] = useState(0);
+  const [micNote, setMicNote] = useState(null);
+  const [result, setResult] = useState(SAMPLE_RESULT);
   const intervalRef = useRef(null);
+  const recorder = useRecorder();
+  const speech = useSpeechTranscript();
+  const micActiveRef = useRef(false);
+  const speechActiveRef = useRef(false);
+  const elapsedRef = useRef(0);
 
-  useEffect(() => () => clearInterval(intervalRef.current), []);
+  useEffect(
+    () => () => {
+      clearInterval(intervalRef.current);
+      recorder.cancel();
+      if (speechActiveRef.current) speech.stop();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
   const startThinking = () => {
     setState("thinking");
@@ -287,27 +334,86 @@ function DemoCard({ onStartFree }) {
     }, 1000);
   };
 
-  const startSpeaking = () => {
+  const startSpeaking = async () => {
     setState("speaking");
-    setSpeakLeft(20);
-    setCapIdx(0);
+    setSpeakLeft(SPEAK_SECONDS);
+    setFallbackCapIdx(0);
+    setMicNote(null);
+    elapsedRef.current = 0;
+    micActiveRef.current = false;
+    speechActiveRef.current = false;
     clearInterval(intervalRef.current);
+
+    const granted = await recorder.start();
+    if (granted) {
+      micActiveRef.current = true;
+      if (speech.supported) {
+        speech.start();
+        speechActiveRef.current = true;
+      }
+    } else {
+      setMicNote("Mic access declined — here's a preview instead.");
+    }
+
     intervalRef.current = setInterval(() => {
+      elapsedRef.current += 1;
       setSpeakLeft((s) => {
         if (s <= 1) {
           clearInterval(intervalRef.current);
-          setState("result");
+          finishSpeaking();
           return 0;
         }
         return s - 1;
       });
-      setCapIdx((i) => (i + 1) % CAPTIONS.length);
+      if (!speechActiveRef.current) setFallbackCapIdx((i) => (i + 1) % FALLBACK_CAPTIONS.length);
     }, 1000);
+  };
+
+  const finishSpeaking = async () => {
+    clearInterval(intervalRef.current);
+    const wasMicActive = micActiveRef.current;
+    const wasSpeechActive = speechActiveRef.current;
+    micActiveRef.current = false;
+    speechActiveRef.current = false;
+
+    const [recResult, speechResult] = await Promise.all([
+      wasMicActive ? recorder.stop() : Promise.resolve(null),
+      wasSpeechActive ? speech.stop() : Promise.resolve(null),
+    ]);
+
+    const transcript = speechResult?.transcript?.trim() || "";
+    const wordCount = transcript ? transcript.split(/\s+/).length : 0;
+
+    if (wordCount >= 4) {
+      const analysis = analyzeTranscript(
+        transcript,
+        elapsedRef.current || SPEAK_SECONDS,
+        recResult?.pauses || null,
+        speechResult?.segments || []
+      );
+      setResult({
+        wpm: analysis.wpm,
+        fillers: analysis.totalFillers,
+        articulation: analysis.articulation?.score ?? SAMPLE_RESULT.articulation,
+        blurb: analysis.paceLabel,
+        real: true,
+      });
+    } else {
+      setResult({ ...SAMPLE_RESULT, real: false });
+      if (!micNote) setMicNote("Didn't catch enough speech to measure — here's a sample result instead.");
+    }
+    setState("result");
   };
 
   const newPrompt = () => {
     clearInterval(intervalRef.current);
+    if (micActiveRef.current) recorder.cancel();
+    if (speechActiveRef.current) speech.stop();
+    micActiveRef.current = false;
+    speechActiveRef.current = false;
     setPromptIdx((i) => (i + 1) % DEMO_PROMPTS.length);
+    setMicNote(null);
+    setResult(SAMPLE_RESULT);
     setState("idle");
   };
 
@@ -321,10 +427,8 @@ function DemoCard({ onStartFree }) {
   const handleAction = () => {
     if (state === "idle") startThinking();
     else if (state === "thinking") startSpeaking();
-    else if (state === "speaking") {
-      clearInterval(intervalRef.current);
-      setState("result");
-    } else onStartFree?.();
+    else if (state === "speaking") finishSpeaking();
+    else onStartFree?.();
   };
 
   return (
@@ -332,7 +436,7 @@ function DemoCard({ onStartFree }) {
       <span className="demo-card-sheen" />
       <div className="demo-card-head">
         <span className="demo-card-eyebrow">Try it — no account</span>
-        <span className="demo-card-badge">Demo · simulated mic</span>
+        <span className="demo-card-badge">Demo · uses your mic</span>
       </div>
 
       <div className="demo-well">
@@ -376,8 +480,17 @@ function DemoCard({ onStartFree }) {
               ))}
             </div>
             <Body className="dim" style={{ fontStyle: "italic", textAlign: "center", fontSize: 13, margin: 0, maxWidth: "26em" }}>
-              "{CAPTIONS[capIdx]}"
+              {speechActiveRef.current
+                ? speech.interimTranscript
+                  ? `"${speech.interimTranscript}"`
+                  : "Listening…"
+                : `"${FALLBACK_CAPTIONS[fallbackCapIdx]}"`}
             </Body>
+            {micNote ? (
+              <Body className="faint" style={{ fontSize: 11.5, textAlign: "center", margin: 0 }}>
+                {micNote}
+              </Body>
+            ) : null}
           </>
         ) : null}
 
@@ -385,24 +498,30 @@ function DemoCard({ onStartFree }) {
           <>
             <div className="demo-result-grid">
               <div className="demo-result-tile">
-                <div className="demo-result-value">142</div>
+                <div className="demo-result-value">{result.wpm}</div>
                 <div className="demo-result-label">words / min</div>
               </div>
               <div className="demo-result-tile">
-                <div className="demo-result-value">3</div>
+                <div className="demo-result-value">{result.fillers}</div>
                 <div className="demo-result-label">filler words</div>
               </div>
               <div className="demo-result-tile">
                 <div className="demo-result-value" style={{ color: "var(--primary)" }}>
-                  74
+                  {result.articulation}
                 </div>
                 <div className="demo-result-label">articulation</div>
               </div>
             </div>
-            <Body style={{ margin: "6px 0 0", fontSize: 13.5, maxWidth: "32em" }}>
-              Nice pace — you slowed down right where it mattered. Your strongest line was the one about the
-              kitchen table; the opening took a third of your time, so there's your first thing to trim.
-            </Body>
+            <Body style={{ margin: "6px 0 0", fontSize: 13.5, maxWidth: "32em" }}>{result.blurb}</Body>
+            {micNote ? (
+              <Body className="faint" style={{ fontSize: 11.5, marginTop: 6 }}>
+                {micNote}
+              </Body>
+            ) : result.real ? (
+              <Body className="faint" style={{ fontSize: 11.5, marginTop: 6 }}>
+                Measured from what you actually said — sign up to get the full AI read too.
+              </Body>
+            ) : null}
           </>
         ) : null}
       </div>
