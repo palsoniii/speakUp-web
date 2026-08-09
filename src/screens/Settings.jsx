@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { KeyRound, LogOut, Mic, Moon, Sparkles, Sun, User } from "lucide-react";
+import { KeyRound, LogOut, MessageSquareHeart, Mic, Moon, Send, Sparkles, Sun, User } from "lucide-react";
 import { Body, Button, Card, IconBadge, Label, LoadErrorNote, Switch, Title } from "../components/UI";
 import { updatePassword } from "../lib/auth";
 import { isSpeechRecognitionSupported } from "../lib/speech";
-import { DEFAULT_SETTINGS, getSettings, setSettings } from "../lib/storage";
+import { DEFAULT_SETTINGS, getSettings, setSettings, submitFeedback } from "../lib/storage";
 import { reportError } from "../lib/errorMonitoring";
 
 const speechSupported = isSpeechRecognitionSupported();
@@ -100,6 +100,18 @@ export default function Settings({ user, onSignOut, theme, onToggleTheme }) {
   const [passwordError, setPasswordError] = useState(null);
   const [passwordSaved, setPasswordSaved] = useState(false);
 
+  // Same "collapsed row -> expanded form" pattern as the password card
+  // above. feedbackSent stays true once a submission lands so re-opening
+  // the card after a successful send shows "Thanks — got it!" instead of
+  // silently resetting to a blank form, in case someone wants to send a
+  // second note.
+  const [showFeedbackForm, setShowFeedbackForm] = useState(false);
+  const [feedbackWorking, setFeedbackWorking] = useState("");
+  const [feedbackNotWorking, setFeedbackNotWorking] = useState("");
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackError, setFeedbackError] = useState(null);
+  const [feedbackSent, setFeedbackSent] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     getSettings()
@@ -185,6 +197,34 @@ export default function Settings({ user, onSignOut, theme, onToggleTheme }) {
       setPasswordError(err?.message || "Couldn't update your password — try again.");
     } finally {
       setPasswordSubmitting(false);
+    }
+  };
+
+  const openFeedbackForm = () => {
+    setShowFeedbackForm(true);
+    setFeedbackError(null);
+  };
+
+  const cancelFeedbackForm = () => {
+    setShowFeedbackForm(false);
+    setFeedbackError(null);
+  };
+
+  const submitFeedbackForm = async () => {
+    if (!feedbackWorking.trim() && !feedbackNotWorking.trim()) return;
+    setFeedbackSubmitting(true);
+    setFeedbackError(null);
+    try {
+      await submitFeedback({ whatsWorking: feedbackWorking, whatsNotWorking: feedbackNotWorking });
+      setShowFeedbackForm(false);
+      setFeedbackWorking("");
+      setFeedbackNotWorking("");
+      setFeedbackSent(true);
+    } catch (err) {
+      reportError(err, "Settings.submitFeedback");
+      setFeedbackError(err?.message || "Couldn't send that — check your connection and try again.");
+    } finally {
+      setFeedbackSubmitting(false);
     }
   };
 
@@ -393,6 +433,57 @@ export default function Settings({ user, onSignOut, theme, onToggleTheme }) {
                 </option>
               ))}
             </select>
+          </Card>
+
+          <Card style={{ marginTop: 16 }}>
+            <div className="settings-row" style={{ paddingTop: 0 }}>
+              <IconBadge icon={MessageSquareHeart} color="#e0648a" size={34} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 14.5, letterSpacing: "-0.01em" }}>Feedback</div>
+                <Body className="dim" style={{ marginTop: 2, fontSize: 12.5 }}>
+                  {feedbackSent && !showFeedbackForm ? "Thanks — got it!" : "Tell us what's working and what's not"}
+                </Body>
+              </div>
+              {!showFeedbackForm ? (
+                <Button title="Send feedback" icon={MessageSquareHeart} variant="secondary" small onClick={openFeedbackForm} />
+              ) : null}
+            </div>
+
+            {showFeedbackForm ? (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+                <Label>What's working well?</Label>
+                <textarea
+                  className="note-input"
+                  style={{ minHeight: 60 }}
+                  placeholder="Optional"
+                  value={feedbackWorking}
+                  onChange={(e) => setFeedbackWorking(e.target.value)}
+                />
+                <Label style={{ marginTop: 12 }}>What's not working / could be better?</Label>
+                <textarea
+                  className="note-input"
+                  style={{ minHeight: 60 }}
+                  placeholder="Optional"
+                  value={feedbackNotWorking}
+                  onChange={(e) => setFeedbackNotWorking(e.target.value)}
+                />
+                {feedbackError ? (
+                  <Body className="ai-feedback-error" style={{ marginTop: 8 }}>
+                    {feedbackError}
+                  </Body>
+                ) : null}
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <Button
+                    title={feedbackSubmitting ? "Sending…" : "Send"}
+                    icon={Send}
+                    small
+                    onClick={submitFeedbackForm}
+                    disabled={feedbackSubmitting || (!feedbackWorking.trim() && !feedbackNotWorking.trim())}
+                  />
+                  <Button title="Cancel" variant="ghost" small onClick={cancelFeedbackForm} disabled={feedbackSubmitting} />
+                </div>
+              </div>
+            ) : null}
           </Card>
 
           <Card style={{ marginTop: 16 }}>

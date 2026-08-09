@@ -280,6 +280,21 @@ export async function getSettings() {
   return settingsFromRow(data);
 }
 
+// Settings screen's Feedback card. One-way write — nothing here reads
+// submissions back; that happens from the Supabase dashboard (or the
+// Supabase MCP) using the project owner's credentials, which bypass the
+// user-scoped RLS policies on app_feedback (see supabase/schema.sql).
+export async function submitFeedback({ whatsWorking, whatsNotWorking } = {}) {
+  const userId = await getCurrentUserId();
+  const row = {
+    user_id: userId,
+    whats_working: whatsWorking?.trim() || null,
+    whats_not_working: whatsNotWorking?.trim() || null,
+  };
+  const { error } = await supabase.from("app_feedback").insert(row);
+  if (error) throw error;
+}
+
 export async function setSettings(partial) {
   const userId = await getCurrentUserId();
   const current = await getSettings();

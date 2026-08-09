@@ -265,6 +265,40 @@ create policy "content_bank_select_authenticated" on public.content_bank
   for select to authenticated using (true);
 
 -- ---------------------------------------------------------------------------
+-- app_feedback: free-text "what's working / what's not" submissions from
+-- the Settings screen's Feedback card (src/screens/Settings.jsx). Same
+-- owner-scoped RLS shape as sessions/settings above — a user can insert
+-- and read back their own submissions, nothing more. There's deliberately
+-- no client-facing "read everyone else's feedback" policy: reviewing
+-- submissions is a developer task, done via the Supabase dashboard's Table
+-- Editor/SQL Editor (or the Supabase MCP) using the project owner's
+-- credentials, which bypass RLS entirely.
+-- ---------------------------------------------------------------------------
+create table if not exists public.app_feedback (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users (id) default auth.uid(),
+  category text not null default 'general' check (category in ('bug', 'feature_request', 'general')),
+  whats_working text,
+  whats_not_working text,
+  message text,
+  rating integer check (rating between 1 and 5),
+  contact_email text,
+  app_version text,
+  status text not null default 'new' check (status in ('new', 'reviewed', 'resolved')),
+  created_at timestamptz not null default now()
+);
+
+alter table public.app_feedback enable row level security;
+
+drop policy if exists "Users can insert their own feedback" on public.app_feedback;
+create policy "Users can insert their own feedback" on public.app_feedback for insert
+  to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "Users can view their own feedback" on public.app_feedback;
+create policy "Users can view their own feedback" on public.app_feedback for select
+  to authenticated using (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------------
 -- Cron: periodic, quota-cheap batch growth of content_bank via the
 -- generate-content Edge Function — one combined Groq call across all five
 -- categories, gated by that function's own MIN_INTERVAL_HOURS guard so a
