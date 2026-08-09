@@ -284,10 +284,11 @@ export async function getSettings() {
 // submissions back; that happens from the Supabase dashboard (or the
 // Supabase MCP) using the project owner's credentials, which bypass the
 // user-scoped RLS policies on app_feedback (see supabase/schema.sql).
-export async function submitFeedback({ whatsWorking, whatsNotWorking } = {}) {
+export async function submitFeedback({ area, whatsWorking, whatsNotWorking } = {}) {
   const userId = await getCurrentUserId();
   const row = {
     user_id: userId,
+    area: area || "other",
     whats_working: whatsWorking?.trim() || null,
     whats_not_working: whatsNotWorking?.trim() || null,
   };

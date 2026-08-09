@@ -288,6 +288,13 @@ create table if not exists public.app_feedback (
   created_at timestamptz not null default now()
 );
 
+-- Which screen/exercise the submission is about — the Feedback card's
+-- dropdown (src/screens/Settings.jsx), values matching App.jsx's tab ids
+-- plus content.js's EXERCISE_TYPES ids one-for-one so a submission can be
+-- traced straight back to a real screen instead of free-text guesswork.
+alter table public.app_feedback add column if not exists area text not null default 'other'
+  check (area in ('home', 'progress', 'badges', 'settings', 'wiki_roulette', 'explain_simply', 'snap_opinion', 'word_of_day', 'word_ladder', 'other'));
+
 alter table public.app_feedback enable row level security;
 
 drop policy if exists "Users can insert their own feedback" on public.app_feedback;

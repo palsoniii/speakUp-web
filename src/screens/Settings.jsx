@@ -5,8 +5,24 @@ import { updatePassword } from "../lib/auth";
 import { isSpeechRecognitionSupported } from "../lib/speech";
 import { DEFAULT_SETTINGS, getSettings, setSettings, submitFeedback } from "../lib/storage";
 import { reportError } from "../lib/errorMonitoring";
+import { EXERCISE_TYPES } from "../lib/content";
 
 const speechSupported = isSpeechRecognitionSupported();
+
+// Values match app_feedback's `area` check constraint (supabase/schema.sql)
+// one-for-one: App.jsx's tab ids for the four bottom-nav screens, plus
+// content.js's EXERCISE_TYPES ids for each of the five practice exercises
+// (reusing their real titles instead of hardcoding a second copy that could
+// drift), plus a catch-all. Lets a submission point at a specific screen or
+// exercise instead of a free-text guess at what someone meant.
+const FEEDBACK_AREA_OPTIONS = [
+  { value: "home", label: "Home" },
+  { value: "progress", label: "Progress" },
+  { value: "badges", label: "Badges" },
+  { value: "settings", label: "Settings / You" },
+  ...EXERCISE_TYPES.map((t) => ({ value: t.id, label: t.title })),
+  { value: "other", label: "Something else" },
+];
 
 // Both options are ones the ai-feedback Edge Function already knows how to
 // serve (see DEFAULT_MODEL/FALLBACK_MODEL in src/lib/aiCoach.js and
@@ -106,6 +122,7 @@ export default function Settings({ user, onSignOut, theme, onToggleTheme }) {
   // silently resetting to a blank form, in case someone wants to send a
   // second note.
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
+  const [feedbackArea, setFeedbackArea] = useState(FEEDBACK_AREA_OPTIONS[0].value);
   const [feedbackWorking, setFeedbackWorking] = useState("");
   const [feedbackNotWorking, setFeedbackNotWorking] = useState("");
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
@@ -215,8 +232,9 @@ export default function Settings({ user, onSignOut, theme, onToggleTheme }) {
     setFeedbackSubmitting(true);
     setFeedbackError(null);
     try {
-      await submitFeedback({ whatsWorking: feedbackWorking, whatsNotWorking: feedbackNotWorking });
+      await submitFeedback({ area: feedbackArea, whatsWorking: feedbackWorking, whatsNotWorking: feedbackNotWorking });
       setShowFeedbackForm(false);
+      setFeedbackArea(FEEDBACK_AREA_OPTIONS[0].value);
       setFeedbackWorking("");
       setFeedbackNotWorking("");
       setFeedbackSent(true);
@@ -451,7 +469,20 @@ export default function Settings({ user, onSignOut, theme, onToggleTheme }) {
 
             {showFeedbackForm ? (
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
-                <Label>What's working well?</Label>
+                <Label>What's this about?</Label>
+                <select
+                  className="field-input"
+                  style={{ marginTop: 8 }}
+                  value={feedbackArea}
+                  onChange={(e) => setFeedbackArea(e.target.value)}
+                >
+                  {FEEDBACK_AREA_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <Label style={{ marginTop: 12 }}>What's working well?</Label>
                 <textarea
                   className="note-input"
                   style={{ minHeight: 60 }}
